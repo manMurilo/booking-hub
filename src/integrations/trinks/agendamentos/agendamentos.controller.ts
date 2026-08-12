@@ -1,16 +1,23 @@
-import { BadRequestException, Body, Controller, Get, Post, Query } from '@nestjs/common';
-import { TrinksService } from './trinks.service';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+} from '@nestjs/common';
+import { AgendamentosService } from './agendamentos.service';
 import {
   TrinksAgendamentosResponse,
   TrinksAgendaResponse,
   TrinksCreateAgendamentoPayload,
   TrinksCreateAgendamentoRequest,
   TrinksDisponibilidadeResponse,
-} from './trinks.types';
+} from './agendamentos.types';
 
 @Controller('trinks')
-export class TrinksController {
-  constructor(private readonly trinksService: TrinksService) {}
+export class AgendamentosController {
+  constructor(private readonly agendamentosService: AgendamentosService) {}
 
   @Get('agendamentos')
   async getAgendamentos(
@@ -24,7 +31,7 @@ export class TrinksController {
     const pageSizeValue = pageSize ? Number(pageSize) : undefined;
     const clienteIdValue = clienteId ? Number(clienteId) : undefined;
 
-    return this.trinksService.getAgendamentos({
+    return this.agendamentosService.getAgendamentos({
       page: Number.isNaN(pageValue) ? undefined : pageValue,
       pageSize: Number.isNaN(pageSizeValue) ? undefined : pageSizeValue,
       clienteId: Number.isNaN(clienteIdValue) ? undefined : clienteIdValue,
@@ -54,7 +61,7 @@ export class TrinksController {
     const intervalosValue = intervalos ? Number(intervalos) : undefined;
     const pageValue = page ? Number(page) : undefined;
 
-    return this.trinksService.getAgenda({
+    return this.agendamentosService.getAgenda({
       data,
       servicoId: Number.isNaN(servicoIdValue) ? undefined : servicoIdValue,
       servicoDuracao: Number.isNaN(servicoDuracaoValue)
@@ -99,7 +106,7 @@ export class TrinksController {
     const intervalosValue = intervalos ? Number(intervalos) : undefined;
     const pageValue = page ? Number(page) : undefined;
 
-    return this.trinksService.getDisponibilidade({
+    return this.agendamentosService.getDisponibilidade({
       data,
       servicoId: Number.isNaN(servicoIdValue) ? undefined : servicoIdValue,
       servicoDuracao: Number.isNaN(servicoDuracaoValue)
@@ -122,13 +129,19 @@ export class TrinksController {
     @Body() payload: TrinksCreateAgendamentoPayload,
   ): TrinksCreateAgendamentoRequest {
     if (typeof payload.servicoId !== 'number') {
-      throw new BadRequestException('servicoId is obrigatório e deve ser number.');
+      throw new BadRequestException(
+        'servicoId is obrigatório e deve ser number.',
+      );
     }
     if (typeof payload.clienteId !== 'number') {
-      throw new BadRequestException('clienteId é obrigatório e deve ser number.');
+      throw new BadRequestException(
+        'clienteId é obrigatório e deve ser number.',
+      );
     }
     if (typeof payload.dataHoraInicio !== 'string') {
-      throw new BadRequestException('dataHoraInicio é obrigatório e deve ser string.');
+      throw new BadRequestException(
+        'dataHoraInicio é obrigatório e deve ser string.',
+      );
     }
     if (typeof payload.duracaoEmMinutos !== 'number') {
       throw new BadRequestException(
@@ -143,18 +156,14 @@ export class TrinksController {
       payload.profissionalId !== null &&
       typeof payload.profissionalId !== 'number'
     ) {
-      throw new BadRequestException(
-        'profissionalId deve ser number ou null.',
-      );
+      throw new BadRequestException('profissionalId deve ser number ou null.');
     }
     if (
       payload.observacoes !== undefined &&
       payload.observacoes !== null &&
       typeof payload.observacoes !== 'string'
     ) {
-      throw new BadRequestException(
-        'observacoes deve ser string ou null.',
-      );
+      throw new BadRequestException('observacoes deve ser string ou null.');
     }
     if (
       payload.confirmado !== undefined &&
@@ -163,6 +172,6 @@ export class TrinksController {
       throw new BadRequestException('confirmado deve ser boolean.');
     }
 
-    return this.trinksService.prepareCreateAgendamentoRequest(payload);
+    return this.agendamentosService.prepareCreateAgendamentoRequest(payload);
   }
 }

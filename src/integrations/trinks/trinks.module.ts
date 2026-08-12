@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
-import { TrinksController } from './trinks.controller';
+import { AgendamentosController } from './agendamentos/agendamentos.controller';
+import { AgendamentosService } from './agendamentos/agendamentos.service';
 import { TrinksService } from './trinks.service';
 
 @Module({
-  controllers: [TrinksController],
-  providers: [TrinksService],
+  controllers: [AgendamentosController],
+  providers: [TrinksService, AgendamentosService],
 })
 export class TrinksModule {}
