@@ -2,6 +2,12 @@
 
 Esta documentação registra o comportamento conhecido da integração do Booking Hub com os recursos de agendamento da API Trinks.
 
+## Contexto atual do sistema
+
+O fluxo de agendamento da aplicação continua sendo uma integração direta com a Trinks, sem camada local de persistência e sem regras de negócio próprias. O backend atua como fachada da API externa e expõe endpoints controlados por `src/integrations/trinks`.
+
+Para uma visão mais ampla da arquitetura atual do projeto, consulte o documento [contexto-geral-da-aplicacao.md](./contexto-geral-da-aplicacao.md) e o [README.md](../README.md).
+
 ## Configuração
 
 A integração utiliza as seguintes variáveis de ambiente:
