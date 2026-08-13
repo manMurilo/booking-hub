@@ -4,7 +4,10 @@ import {
   Controller,
   Get,
   Post,
+  Put,
+  Patch,
   Query,
+  Param,
 } from '@nestjs/common';
 import { AgendamentosService } from './agendamentos.service';
 import {
@@ -13,6 +16,8 @@ import {
   TrinksCreateAgendamentoPayload,
   TrinksCreateAgendamentoRequest,
   TrinksDisponibilidadeResponse,
+  EditarAgendamentoModel,
+  CancelamentoAgendamentoModel,
 } from './agendamentos.types';
 
 @Controller('trinks')
@@ -122,6 +127,108 @@ export class AgendamentosController {
           ? undefined
           : excluirExcecoesDeAgendamentoOnline === 'true',
     });
+  }
+
+  @Post('agendamentos')
+  async createAgendamento(
+    @Body() payload: TrinksCreateAgendamentoPayload,
+  ): Promise<unknown> {
+    if (typeof payload.servicoId !== 'number') {
+      throw new BadRequestException(
+        'servicoId is obrigatório e deve ser number.',
+      );
+    }
+    if (typeof payload.clienteId !== 'number') {
+      throw new BadRequestException(
+        'clienteId é obrigatório e deve ser number.',
+      );
+    }
+    if (typeof payload.dataHoraInicio !== 'string') {
+      throw new BadRequestException(
+        'dataHoraInicio é obrigatório e deve ser string.',
+      );
+    }
+    if (typeof payload.duracaoEmMinutos !== 'number') {
+      throw new BadRequestException(
+        'duracaoEmMinutos é obrigatório e deve ser number.',
+      );
+    }
+    if (typeof payload.valor !== 'number') {
+      throw new BadRequestException('valor é obrigatório e deve ser number.');
+    }
+    if (
+      payload.profissionalId !== undefined &&
+      payload.profissionalId !== null &&
+      typeof payload.profissionalId !== 'number'
+    ) {
+      throw new BadRequestException('profissionalId deve ser number ou null.');
+    }
+    if (
+      payload.observacoes !== undefined &&
+      payload.observacoes !== null &&
+      typeof payload.observacoes !== 'string'
+    ) {
+      throw new BadRequestException('observacoes deve ser string ou null.');
+    }
+    if (
+      payload.confirmado !== undefined &&
+      typeof payload.confirmado !== 'boolean'
+    ) {
+      throw new BadRequestException('confirmado deve ser boolean.');
+    }
+
+    const preparedRequest =
+      this.agendamentosService.prepareCreateAgendamentoRequest(payload);
+
+    return this.agendamentosService.createAgendamento(preparedRequest);
+  }
+
+  @Put('agendamentos/:id')
+  async editAgendamento(
+    @Param('id') id?: string,
+    @Body() payload?: EditarAgendamentoModel,
+  ): Promise<void> {
+    const idValue = id ? Number(id) : undefined;
+
+    if (idValue === undefined || Number.isNaN(idValue)) {
+      throw new BadRequestException('id é obrigatório e deve ser number.');
+    }
+
+    if (!payload) {
+      throw new BadRequestException('payload é obrigatório.');
+    }
+
+    if (typeof payload.servicoId !== 'number') {
+      throw new BadRequestException('servicoId é obrigatório e deve ser number.');
+    }
+    if (typeof payload.clienteId !== 'number') {
+      throw new BadRequestException('clienteId é obrigatório e deve ser number.');
+    }
+    if (typeof payload.dataHoraInicio !== 'string') {
+      throw new BadRequestException('dataHoraInicio é obrigatório e deve ser string.');
+    }
+    if (typeof payload.duracaoEmMinutos !== 'number') {
+      throw new BadRequestException('duracaoEmMinutos é obrigatório e deve ser number.');
+    }
+    if (typeof payload.valor !== 'number') {
+      throw new BadRequestException('valor é obrigatório e deve ser number.');
+    }
+
+    return this.agendamentosService.updateAgendamento(idValue, payload);
+  }
+
+  @Patch('agendamentos/:agendamentoId/status/cancelado')
+  async cancelarAgendamento(
+    @Param('agendamentoId') agendamentoId?: string,
+    @Body() payload?: CancelamentoAgendamentoModel,
+  ): Promise<void> {
+    const idValue = agendamentoId ? Number(agendamentoId) : undefined;
+
+    if (idValue === undefined || Number.isNaN(idValue)) {
+      throw new BadRequestException('agendamentoId é obrigatório e deve ser number.');
+    }
+
+    return this.agendamentosService.cancelarAgendamento(idValue, payload ?? {});
   }
 
   @Post('agendamentos/prepare')

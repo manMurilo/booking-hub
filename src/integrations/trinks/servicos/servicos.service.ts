@@ -1,0 +1,118 @@
+import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { TrinksService } from '../trinks.service';
+import {
+  TrinksServicosResponse,
+  TrinksServicosQuery,
+  TrinksServico,
+} from './servicos.types';
+
+@Injectable()
+export class ServicosService {
+  private readonly logger = new Logger(ServicosService.name);
+
+  constructor(private readonly trinksService: TrinksService) {}
+
+  async getServicos(
+    query: TrinksServicosQuery,
+  ): Promise<TrinksServicosResponse<TrinksServico>> {
+    const { apiKey, baseUrl, estabelecimentoId } =
+      this.trinksService.getApiConfig();
+    const url = this.trinksService.buildApiUrl('/servicos', baseUrl);
+
+    if (query.page !== undefined) {
+      url.searchParams.set('page', String(query.page));
+    }
+    if (query.pageSize !== undefined) {
+      url.searchParams.set('pageSize', String(query.pageSize));
+    }
+    if (query.nome !== undefined) {
+      url.searchParams.set('nome', String(query.nome));
+    }
+    if (query.id !== undefined) {
+      url.searchParams.set('id', String(query.id));
+    }
+    if (query.ativo !== undefined) {
+      url.searchParams.set('ativo', String(query.ativo));
+    }
+
+    const headers = {
+      'X-Api-Key': apiKey,
+      estabelecimentoId,
+      Accept: 'application/json',
+    };
+
+    let response: Response;
+
+    try {
+      response = await (globalThis as any).fetch(url.toString(), {
+        method: 'GET',
+        headers,
+      });
+    } catch (error) {
+      this.logger.error(
+        'Failed to communicate with Trinks API',
+        error as Error,
+      );
+      throw new HttpException(
+        'Failed to communicate with Trinks API',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
+    const responseText = await response.text();
+    let payload: unknown;
+
+    try {
+      payload = responseText ? JSON.parse(responseText) : {};
+    } catch (error) {
+      this.logger.error(
+        'Invalid JSON received from Trinks API',
+        error as Error,
+      );
+      throw new HttpException(
+        'Invalid response from Trinks API',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
+    if (response.ok) {
+      return payload as TrinksServicosResponse<TrinksServico>;
+    }
+
+    switch (response.status) {
+      case HttpStatus.UNAUTHORIZED:
+      case HttpStatus.FORBIDDEN:
+        throw new HttpException(
+          'Trinks API authentication or authorization failed',
+          HttpStatus.BAD_GATEWAY,
+        );
+      case HttpStatus.BAD_REQUEST:
+        throw new HttpException(
+          payload || 'Bad request to Trinks API',
+          HttpStatus.BAD_REQUEST,
+        );
+      case HttpStatus.NOT_FOUND:
+        throw new HttpException(
+          'Trinks endpoint not found',
+          HttpStatus.NOT_FOUND,
+        );
+      case HttpStatus.TOO_MANY_REQUESTS:
+        this.logger.warn(
+          'Trinks rate limit reached (HTTP 429). No retry will be performed.',
+        );
+        throw new HttpException(
+          'Trinks rate limit reached',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      default:
+        this.logger.error(
+          `Trinks API returned unexpected status ${response.status}`,
+          payload as Error,
+        );
+        throw new HttpException(
+          'Trinks API returned an unexpected error',
+          HttpStatus.BAD_GATEWAY,
+        );
+    }
+  }
+}

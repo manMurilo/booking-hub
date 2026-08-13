@@ -64,3 +64,18 @@ export interface TrinksAgendaResponse {
 }
 
 export type TrinksDisponibilidadeResponse = TrinksAgendaResponse;
+
+export interface EditarAgendamentoModel {
+  servicoId: number;
+  clienteId: number;
+  profissionalId?: number | null;
+  dataHoraInicio: string;
+  duracaoEmMinutos: number;
+  valor: number;
+  observacoes?: string | null;
+}
+
+export interface CancelamentoAgendamentoModel {
+  quemCancelou?: number;
+  motivo?: string | null;
+}
