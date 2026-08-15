@@ -5,18 +5,14 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { AIService } from '../../ai/ai.service';
-import { AIMessage } from '../../ai/ai.types';
 import { BookingService } from '../booking/booking.service';
 import { ConversationStateService } from '../conversation-state/conversation-state.service';
-import {
-  WhatsAppMessage,
-  WhatsAppResponse,
-  ProcessMessageResult,
-} from './whatsapp.types';
+import { ConversationFlowOrchestrator } from '../conversation-state/conversation-flow.orchestrator';
+import { WhatsAppMessage, ProcessMessageResult } from './whatsapp.types';
 import {
   ConversationStage,
-  UserIntention,
 } from '../conversation-state/conversation-state.types';
+import { PendingAction, FlowDecision, ConversationContext } from '../conversation-state/conversation-flow.types';
 import { BaileysConnectionService } from '../../integrations/whatsapp/baileys-connection.service';
 import { WhatsAppMessageAdapterService } from '../../integrations/whatsapp/whatsapp-message-adapter.service';
 import { WhatsAppIncomingMessage } from '../../integrations/whatsapp/whatsapp-integration.types';
@@ -52,6 +48,7 @@ export class WhatsAppService implements OnModuleInit {
     private aiService: AIService,
     private bookingService: BookingService,
     private conversationStateService: ConversationStateService,
+    private conversationFlowOrchestrator: ConversationFlowOrchestrator,
     private baileysConnectionService: BaileysConnectionService,
     private messageAdapterService: WhatsAppMessageAdapterService,
   ) {}
@@ -288,10 +285,6 @@ export class WhatsAppService implements OnModuleInit {
         conversationId.replace(/_\d+$/, ''),
       );
 
-    const previousHistory = this.conversationStateService.getMessageHistory(
-      state.conversationId,
-    );
-
     for (const message of batch) {
       this.conversationStateService.addMessageToHistory(
         state.conversationId,
@@ -300,80 +293,131 @@ export class WhatsAppService implements OnModuleInit {
       );
     }
 
-    const userMessageText = batch
-      .map((message) => message.text.trim())
-      .filter(Boolean)
-      .join(' ');
-
-    const conversationContext = {
-      conversationId: state.conversationId,
-      messages: previousHistory.map((msg): AIMessage => ({
-        role:
-          msg.role === 'client'
-            ? 'user'
-            : msg.role === 'bot'
-              ? 'assistant'
-              : 'user',
-        content: msg.content,
-      })),
-      systemPrompt: this.aiService.getSystemPrompt(),
-      metadata: {
-        stage: state.currentStage,
-        intention: state.lastIntention,
-        customerName: state.client?.firstName,
-        clientData: state.client,
-        schedulingData: state.scheduling,
-        recentHistory: this.conversationStateService
-          .getMessageHistory(state.conversationId)
-          .slice(-10),
-      },
-    };
-
     this.logger.log(
-      `[AI] PROCESSANDO TURNO\n   Conversa: ${state.conversationId}\n   Mensagens agrupadas: ${batch.length}`,
+      `[FlowOrchestrator] INICIANDO ORQUESTRAÇÃO\n   Conversa: ${state.conversationId}\n   Step atual: ${state.currentStage}`,
     );
 
-    const aiResult = await this.aiService.processMessage(
-      userMessageText,
+    // Converter ConversationState para ConversationContext (novo)
+    const conversationContext =
+      this.conversationStateService.toConversationContext(state);
+
+    // Chamar orchestrator para determinar próximo passo
+    const flowDecision =
+      this.conversationFlowOrchestrator.determineNextStep(conversationContext);
+
+    this.logger.log(
+      `[FlowOrchestrator] DECISÃO\n   Conversa: ${state.conversationId}\n   Próximo step: ${flowDecision.nextStep}\n   Ação: ${flowDecision.action}`,
+    );
+
+    // Processar a decisão do orchestrator
+    const responseText = this.processFlowDecision(
+      state.conversationId,
+      flowDecision,
+    );
+
+    // Atualizar estado da conversa a partir do contexto processado
+    conversationContext.step = flowDecision.nextStep;
+    conversationContext.pendingAction = flowDecision.action;
+    this.conversationStateService.updateFromConversationContext(
+      state.conversationId,
       conversationContext,
     );
 
+    // Adicionar resposta ao histórico
     this.conversationStateService.addMessageToHistory(
       state.conversationId,
       'bot',
-      aiResult.message,
+      responseText,
     );
 
-    const action = this.determineNextAction(
-      userMessageText,
-      aiResult.message,
-      state,
-    );
-
-    if (action === 'escalate') {
-      this.conversationStateService.markForHumanHandover(state.conversationId);
-    }
-
-    const nextStage = this.getNextStage(state.currentStage, action);
-    this.conversationStateService.updateStage(state.conversationId, nextStage);
+    // Manter compatibilidade com resultado existente
+    const action =
+      flowDecision.action === PendingAction.HANDOVER
+        ? 'escalate'
+        : flowDecision.action === PendingAction.FINISH
+          ? 'complete'
+          : 'continue';
 
     const result: ProcessMessageResult = {
       conversationId: state.conversationId,
-      aiResponse: aiResult.message,
+      aiResponse: responseText,
       action,
       metadata: {
-        stage: state.currentStage,
+        stage: flowDecision.nextStep,
         messageCount: this.conversationStateService.getMessageHistory(
           state.conversationId,
         ).length,
+        flowAction: flowDecision.action,
       },
     };
 
     if (jid) {
-      await this.sendResponseViaBaileys(jid, aiResult.message);
+      await this.sendResponseViaBaileys(jid, responseText);
     }
 
     return result;
+  }
+
+  /**
+   * Processa a decisão de fluxo retornada pelo orquestrador
+   * Trata as ações básicas e retorna a mensagem a enviar
+   *
+   * @param conversationId - ID da conversa
+   * @param decision - Decisão do orquestrador
+   * @returns Mensagem a enviar ao usuário
+   */
+  private processFlowDecision(
+    conversationId: string,
+    decision: FlowDecision,
+  ): string {
+    const { action, messageToUser } = decision;
+
+    switch (action) {
+      case PendingAction.ASK_USER:
+        // Fazer pergunta ao usuário
+        return messageToUser || 'Como posso te ajudar?';
+
+      case PendingAction.WAIT_USER_RESPONSE:
+        // Apenas aguardar resposta, não enviar nada
+        return '';
+
+      case PendingAction.CONFIRM:
+        // Pedir confirmação
+        return messageToUser || 'Confirme os dados, por favor.';
+
+      case PendingAction.HANDOVER:
+        // Encaminhar para atendente
+        this.conversationStateService.markForHumanHandover(conversationId);
+        return messageToUser || 'Vou conectar você com uma atendente.';
+
+      case PendingAction.FINISH:
+        // Finalizar conversa
+        return messageToUser || 'Conversa finalizada. Obrigado!';
+
+      case PendingAction.CONSULT_TRINKS:
+        // Operação Trinks será implementada na próxima etapa
+        this.logger.log(
+          `[FlowOrchestrator] Operação Trinks identificada: ${decision.trinksOperation?.operation}`,
+        );
+        return (
+          messageToUser || 'Consultando informações... Um momento, por favor.'
+        );
+
+      case PendingAction.EXECUTE_TRINKS_ACTION:
+        // Ação Trinks será implementada na próxima etapa
+        this.logger.log(
+          `[FlowOrchestrator] Ação Trinks identificada: ${decision.trinksOperation?.operation}`,
+        );
+        return (
+          messageToUser ||
+          'Processando sua solicitação... Um momento, por favor.'
+        );
+
+      case PendingAction.NONE:
+      default:
+        // Sem ação definida
+        return messageToUser || 'Pronto. Qual é o próximo passo?';
+    }
   }
 
   /**
