@@ -73,11 +73,15 @@ export interface IWhatsAppConnection {
   disconnect(): Promise<void>;
 
   // Mensagens
-  onMessage(callback: (message: WhatsAppIncomingMessage) => Promise<void>): void;
+  onMessage(
+    callback: (message: WhatsAppIncomingMessage) => Promise<void>,
+  ): void;
   sendMessage(message: WhatsAppOutgoingMessage): Promise<WhatsAppSendResult>;
 
   // Eventos
-  onConnectionStateChange(callback: (event: WhatsAppConnectionEvent) => void): void;
+  onConnectionStateChange(
+    callback: (event: WhatsAppConnectionEvent) => void,
+  ): void;
 
   // Limpeza
   close(): Promise<void>;

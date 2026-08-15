@@ -73,15 +73,15 @@ export class WhatsAppController {
             };
 
             try {
-              const result = await this.whatsAppService.processMessage(
-                whatsAppMessage,
-              );
+              const result =
+                await this.whatsAppService.processMessage(whatsAppMessage);
               results.push(result);
               this.logger.log(
                 `Processed message from ${msg.from}: ${result.conversationId}`,
               );
             } catch (error) {
-              const message = error instanceof Error ? error.message : 'Unknown error';
+              const message =
+                error instanceof Error ? error.message : 'Unknown error';
               this.logger.error(
                 `Error processing individual message: ${message}`,
               );

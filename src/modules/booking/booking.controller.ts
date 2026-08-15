@@ -50,7 +50,9 @@ export class BookingController {
    * @returns Cliente encontrado ou mensagem de not found
    */
   @Get('cliente/by-phone')
-  async findClienteByPhone(@Query('phone') phone: string): Promise<FindClienteResponse> {
+  async findClienteByPhone(
+    @Query('phone') phone: string,
+  ): Promise<FindClienteResponse> {
     return this.bookingService.findClienteByPhoneNumber(phone);
   }
 
@@ -62,7 +64,9 @@ export class BookingController {
    * @returns Cliente encontrado ou mensagem de not found
    */
   @Get('cliente/by-cpf')
-  async findClienteByCpf(@Query('cpf') cpf: string): Promise<FindClienteResponse> {
+  async findClienteByCpf(
+    @Query('cpf') cpf: string,
+  ): Promise<FindClienteResponse> {
     return this.bookingService.findClienteByCpf(cpf);
   }
 
@@ -79,7 +83,10 @@ export class BookingController {
     @Query('profissionalId') profissionalId: string,
     @Query('data') data: string,
   ): Promise<AvailabilityResponse> {
-    return this.bookingService.getAvailabilityForDay(parseInt(profissionalId, 10), data);
+    return this.bookingService.getAvailabilityForDay(
+      parseInt(profissionalId, 10),
+      data,
+    );
   }
 
   /**

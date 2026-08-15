@@ -199,16 +199,24 @@ export class AgendamentosController {
     }
 
     if (typeof payload.servicoId !== 'number') {
-      throw new BadRequestException('servicoId é obrigatório e deve ser number.');
+      throw new BadRequestException(
+        'servicoId é obrigatório e deve ser number.',
+      );
     }
     if (typeof payload.clienteId !== 'number') {
-      throw new BadRequestException('clienteId é obrigatório e deve ser number.');
+      throw new BadRequestException(
+        'clienteId é obrigatório e deve ser number.',
+      );
     }
     if (typeof payload.dataHoraInicio !== 'string') {
-      throw new BadRequestException('dataHoraInicio é obrigatório e deve ser string.');
+      throw new BadRequestException(
+        'dataHoraInicio é obrigatório e deve ser string.',
+      );
     }
     if (typeof payload.duracaoEmMinutos !== 'number') {
-      throw new BadRequestException('duracaoEmMinutos é obrigatório e deve ser number.');
+      throw new BadRequestException(
+        'duracaoEmMinutos é obrigatório e deve ser number.',
+      );
     }
     if (typeof payload.valor !== 'number') {
       throw new BadRequestException('valor é obrigatório e deve ser number.');
@@ -225,7 +233,9 @@ export class AgendamentosController {
     const idValue = agendamentoId ? Number(agendamentoId) : undefined;
 
     if (idValue === undefined || Number.isNaN(idValue)) {
-      throw new BadRequestException('agendamentoId é obrigatório e deve ser number.');
+      throw new BadRequestException(
+        'agendamentoId é obrigatório e deve ser number.',
+      );
     }
 
     return this.agendamentosService.cancelarAgendamento(idValue, payload ?? {});

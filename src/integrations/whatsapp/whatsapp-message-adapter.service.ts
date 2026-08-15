@@ -88,9 +88,13 @@ export class WhatsAppMessageAdapterService {
     const normalized = this.normalizePhoneNumber(phone);
     // Formato: +55 11 98765-4321
     if (normalized.length === 13 && normalized.startsWith('55')) {
-      const formatted = normalized.slice(0, 2) + ' ' +
-        normalized.slice(2, 4) + ' ' +
-        normalized.slice(4, 9) + '-' +
+      const formatted =
+        normalized.slice(0, 2) +
+        ' ' +
+        normalized.slice(2, 4) +
+        ' ' +
+        normalized.slice(4, 9) +
+        '-' +
         normalized.slice(9);
       return '+' + formatted;
     }

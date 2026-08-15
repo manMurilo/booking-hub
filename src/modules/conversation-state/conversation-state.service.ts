@@ -19,6 +19,7 @@ import {
 @Injectable()
 export class ConversationStateService {
   private readonly logger = new Logger(ConversationStateService.name);
+  private readonly maxHistoryMessages = 50;
 
   /**
    * Em produção, isso seria um banco de dados ou Redis
@@ -50,7 +51,7 @@ export class ConversationStateService {
     };
 
     this.conversationStore.set(conversationId, state);
-    this.logger.log(`Conversa criada: ${conversationId}`);
+    this.logger.log(`[ConversationState] Conversa criada: ${conversationId}`);
 
     return state;
   }
@@ -71,17 +72,18 @@ export class ConversationStateService {
    * @returns Estado da conversa
    */
   getOrCreateConversation(phoneNumber: string): ConversationState {
-    // Buscar conversa recente (últimas 24h) para este telefone
     for (const [, state] of this.conversationStore) {
       if (
         state.phoneNumber === phoneNumber &&
         Date.now() - state.lastMessageAt.getTime() < 24 * 60 * 60 * 1000
       ) {
+        this.logger.log(
+          `[ConversationState] Conversa recuperada: ${state.conversationId}`,
+        );
         return state;
       }
     }
 
-    // Criar nova conversa
     return this.createConversation(phoneNumber);
   }
 
@@ -97,11 +99,14 @@ export class ConversationStateService {
       return;
     }
 
-    state.previousStage = state.currentStage;
+    const previousStage = state.currentStage;
+    state.previousStage = previousStage;
     state.currentStage = newStage;
     state.lastMessageAt = new Date();
 
-    this.logger.debug(`Estágio atualizado: ${state.previousStage} → ${newStage}`);
+    this.logger.log(
+      `[ConversationState] Estágio atualizado:\n   ${previousStage} → ${newStage}`,
+    );
   }
 
   /**
@@ -109,7 +114,10 @@ export class ConversationStateService {
    * @param conversationId - ID da conversa
    * @param clientData - Dados a atualizar
    */
-  updateClientData(conversationId: string, clientData: Partial<ClientData>): void {
+  updateClientData(
+    conversationId: string,
+    clientData: Partial<ClientData>,
+  ): void {
     const state = this.getConversation(conversationId);
     if (!state) {
       this.logger.warn(`Conversa não encontrada: ${conversationId}`);
@@ -136,7 +144,7 @@ export class ConversationStateService {
     }
 
     if (!state.scheduling) {
-      state.scheduling = {} as SchedulingData;
+      state.scheduling = {};
     }
 
     state.scheduling = { ...state.scheduling, ...schedulingData };
@@ -170,10 +178,15 @@ export class ConversationStateService {
     state.messageHistory.push(message);
     state.lastMessageAt = new Date();
 
-    // Manter apenas as últimas 50 mensagens (para economizar memória)
-    if (state.messageHistory.length > 50) {
-      state.messageHistory = state.messageHistory.slice(-50);
+    if (state.messageHistory.length > this.maxHistoryMessages) {
+      state.messageHistory = state.messageHistory.slice(
+        -this.maxHistoryMessages,
+      );
     }
+
+    this.logger.log(
+      `[ConversationState] Mensagem adicionada:\n   Conversation: ${conversationId}\n   Role: ${role.toUpperCase()}\n   Histórico: ${state.messageHistory.length}`,
+    );
   }
 
   /**
@@ -182,7 +195,10 @@ export class ConversationStateService {
    * @param limit - Número máximo de mensagens (0 = todas)
    * @returns Array de mensagens
    */
-  getMessageHistory(conversationId: string, limit: number = 0): MessageHistory[] {
+  getMessageHistory(
+    conversationId: string,
+    limit: number = 0,
+  ): MessageHistory[] {
     const state = this.getConversation(conversationId);
     if (!state) {
       return [];
@@ -208,6 +224,7 @@ export class ConversationStateService {
     }
 
     state.lastIntention = intention;
+    state.lastMessageAt = new Date();
   }
 
   /**
@@ -289,7 +306,10 @@ export class ConversationStateService {
    * @param conversationId - ID da conversa
    * @param isContinuing - true se está continuando
    */
-  setContinuingPreviousFlow(conversationId: string, isContinuing: boolean): void {
+  setContinuingPreviousFlow(
+    conversationId: string,
+    isContinuing: boolean,
+  ): void {
     const state = this.getConversation(conversationId);
     if (!state) {
       this.logger.warn(`Conversa não encontrada: ${conversationId}`);

@@ -31,7 +31,10 @@ export class CpfValidator {
    * @param multiplier - começa com 10 (primeiro dígito) ou 11 (segundo dígito)
    * @returns dígito verificador
    */
-  private static calculateCheckDigit(baseDigits: string, multiplier: number): number {
+  private static calculateCheckDigit(
+    baseDigits: string,
+    multiplier: number,
+  ): number {
     let sum = 0;
     for (let i = 0; i < baseDigits.length; i++) {
       sum += parseInt(baseDigits[i], 10) * (multiplier - i);
@@ -59,13 +62,19 @@ export class CpfValidator {
     }
 
     // Valida primeiro dígito verificador
-    const firstCheckDigit = this.calculateCheckDigit(normalized.substring(0, 9), 10);
+    const firstCheckDigit = this.calculateCheckDigit(
+      normalized.substring(0, 9),
+      10,
+    );
     if (parseInt(normalized[9], 10) !== firstCheckDigit) {
       return false;
     }
 
     // Valida segundo dígito verificador
-    const secondCheckDigit = this.calculateCheckDigit(normalized.substring(0, 10), 11);
+    const secondCheckDigit = this.calculateCheckDigit(
+      normalized.substring(0, 10),
+      11,
+    );
     if (parseInt(normalized[10], 10) !== secondCheckDigit) {
       return false;
     }

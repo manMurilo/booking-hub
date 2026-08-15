@@ -15,7 +15,11 @@ import { WhatsAppMessageAdapterService } from '../../integrations/whatsapp/whats
 @Module({
   imports: [AIModule, BookingModule, ConversationStateModule],
   controllers: [WhatsAppController],
-  providers: [WhatsAppService, BaileysConnectionService, WhatsAppMessageAdapterService],
+  providers: [
+    WhatsAppService,
+    BaileysConnectionService,
+    WhatsAppMessageAdapterService,
+  ],
   exports: [WhatsAppService],
 })
 export class WhatsAppModule {}

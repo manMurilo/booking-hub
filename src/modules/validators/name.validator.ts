@@ -42,7 +42,21 @@ export class NameValidator {
       .map((word) => {
         if (word.length === 0) return word;
         // Preserva conectores como "de", "da", "do", etc. em minúscula
-        if (['de', 'da', 'do', 'di', 'du', 'e', 'é', 'o', 'os', 'a', 'as'].includes(word)) {
+        if (
+          [
+            'de',
+            'da',
+            'do',
+            'di',
+            'du',
+            'e',
+            'é',
+            'o',
+            'os',
+            'a',
+            'as',
+          ].includes(word)
+        ) {
           return word;
         }
         return word.charAt(0).toUpperCase() + word.slice(1);

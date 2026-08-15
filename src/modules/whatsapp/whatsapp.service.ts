@@ -1,4 +1,9 @@
-import { Injectable, Logger, BadRequestException, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { AIService } from '../../ai/ai.service';
 import { AIMessage } from '../../ai/ai.types';
 import { BookingService } from '../booking/booking.service';
@@ -16,6 +21,14 @@ import { BaileysConnectionService } from '../../integrations/whatsapp/baileys-co
 import { WhatsAppMessageAdapterService } from '../../integrations/whatsapp/whatsapp-message-adapter.service';
 import { WhatsAppIncomingMessage } from '../../integrations/whatsapp/whatsapp-integration.types';
 
+type PendingConversationBatch = {
+  conversationId: string;
+  jid?: string;
+  messages: WhatsAppMessage[];
+  timer?: NodeJS.Timeout;
+  status: 'PENDING' | 'PROCESSING';
+};
+
 /**
  * WhatsApp Service - Orchestrates AI, Booking, Conversation State, and Baileys
  * Main logic for processing customer messages and generating responses
@@ -29,6 +42,11 @@ import { WhatsAppIncomingMessage } from '../../integrations/whatsapp/whatsapp-in
 @Injectable()
 export class WhatsAppService implements OnModuleInit {
   private readonly logger = new Logger(WhatsAppService.name);
+  private readonly debounceMs = 2000;
+  private readonly pendingConversations = new Map<
+    string,
+    PendingConversationBatch
+  >();
 
   constructor(
     private aiService: AIService,
@@ -44,7 +62,7 @@ export class WhatsAppService implements OnModuleInit {
    */
   async onModuleInit(): Promise<void> {
     this.logger.log('[WhatsApp Service] Inicializando...');
-    
+
     // Registrar handler para recebimento de mensagens
     this.baileysConnectionService.onMessage(
       this.handleIncomingMessageFromBaileys.bind(this),
@@ -52,7 +70,9 @@ export class WhatsAppService implements OnModuleInit {
 
     // Registrar handler para mudanças de conexão (para logs)
     this.baileysConnectionService.onConnectionStateChange((event) => {
-      this.logger.log(`[WhatsApp Service] Estado de conexão: ${event.state} - ${event.message}`);
+      this.logger.log(
+        `[WhatsApp Service] Estado de conexão: ${event.state} - ${event.message}`,
+      );
     });
 
     this.logger.log('[WhatsApp Service] Inicializado e aguardando mensagens');
@@ -62,14 +82,13 @@ export class WhatsAppService implements OnModuleInit {
    * Handler chamado quando Baileys recebe uma mensagem
    * Esta é a entrada de mensagens reais de WhatsApp
    */
-  private async handleIncomingMessageFromBaileys(baileysMessage: WhatsAppIncomingMessage): Promise<void> {
+  private async handleIncomingMessageFromBaileys(
+    baileysMessage: WhatsAppIncomingMessage,
+  ): Promise<void> {
     try {
-      // Normalizar mensagem do Baileys para formato interno
-      const normalizedMessage = this.messageAdapterService.normalizeIncomingMessage(
-        baileysMessage,
-      );
+      const normalizedMessage =
+        this.messageAdapterService.normalizeIncomingMessage(baileysMessage);
 
-      // Converter para formato esperado pelo WhatsAppService
       const whatsAppMessage: WhatsAppMessage = {
         from: normalizedMessage.from,
         text: normalizedMessage.text,
@@ -77,34 +96,19 @@ export class WhatsAppService implements OnModuleInit {
         messageId: normalizedMessage.messageId,
       };
 
-      // Log de processamento iniciado
       this.logger.log(
-        `⚙️  WHATSAPP — PROCESSANDO\n` +
-        `   De: ${whatsAppMessage.from}`,
+        `📥 WHATSAPP — MENSAGEM RECEBIDA\n   De: ${whatsAppMessage.from}`,
       );
 
-      // Processar através do fluxo normal
-      const result = await this.processMessage(whatsAppMessage);
-
-      // Log de resposta gerada
-      this.logger.log(
-        `🤖 AI — RESPOSTA GERADA\n` +
-        `   Para: ${whatsAppMessage.from}\n` +
-        `   Resposta: "${result.aiResponse.substring(0, 100)}${result.aiResponse.length > 100 ? '...' : ''}"`,
-      );
-
-      // Enviar resposta de volta usando o JID original da conversa
-      await this.sendResponseViaBaileys(baileysMessage.jid, result.aiResponse);
-
+      this.queueMessageForDebounce(whatsAppMessage, baileysMessage.jid);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(
         `❌ WHATSAPP — ERRO AO PROCESSAR\n` +
-        `   De: ${baileysMessage.sender}\n` +
-        `   Erro: ${message}`,
+          `   De: ${baileysMessage.sender}\n` +
+          `   Erro: ${message}`,
       );
-      
-      // Enviar mensagem de erro para o mesmo JID da conversa
+
       if (baileysMessage.jid) {
         try {
           const errorMessage = `Desculpe, ocorreu um erro ao processar sua mensagem. Tente novamente mais tarde.`;
@@ -112,7 +116,7 @@ export class WhatsAppService implements OnModuleInit {
         } catch (sendError) {
           this.logger.error(
             `❌ WHATSAPP — ERRO AO ENVIAR MENSAGEM DE ERRO\n` +
-            `   Para: ${baileysMessage.jid}`,
+              `   Para: ${baileysMessage.jid}`,
           );
         }
       }
@@ -122,23 +126,30 @@ export class WhatsAppService implements OnModuleInit {
   /**
    * Enviar resposta de volta para o usuário via Baileys
    */
-  private async sendResponseViaBaileys(to: string, text: string): Promise<void> {
-    const outgoingMessage = this.messageAdapterService.prepareOutgoingMessage(to, text);
-    const result = await this.baileysConnectionService.sendMessage(outgoingMessage);
+  private async sendResponseViaBaileys(
+    to: string,
+    text: string,
+  ): Promise<void> {
+    const outgoingMessage = this.messageAdapterService.prepareOutgoingMessage(
+      to,
+      text,
+    );
+    const result =
+      await this.baileysConnectionService.sendMessage(outgoingMessage);
 
     if (result.status === 'failed') {
       this.logger.error(
         `❌ WHATSAPP — ERRO NO ENVIO\n` +
-        `   Para: ${to}\n` +
-        `   Erro: ${result.error}`,
+          `   Para: ${to}\n` +
+          `   Erro: ${result.error}`,
       );
       return;
     }
 
     this.logger.log(
       `📤 WHATSAPP — ENVIO SOLICITADO\n` +
-      `   Para: ${to}\n` +
-      `   Message ID: ${result.messageId || '(sem id recebido)'}`,
+        `   Para: ${to}\n` +
+        `   Message ID: ${result.messageId || '(sem id recebido)'}`,
     );
   }
 
@@ -153,97 +164,216 @@ export class WhatsAppService implements OnModuleInit {
    * @param message - WhatsApp message
    * @returns Response to send back
    */
-  async processMessage(message: WhatsAppMessage): Promise<ProcessMessageResult> {
+  async processMessage(
+    message: WhatsAppMessage,
+  ): Promise<ProcessMessageResult> {
     if (!message.from || !message.text) {
       throw new BadRequestException('Invalid message: missing from or text');
     }
 
-    // Normalize phone number for consistency
     const phoneNormalized = this.normalizePhone(message.from);
+    const conversation =
+      this.conversationStateService.getOrCreateConversation(phoneNormalized);
+
+    this.queueMessageForDebounce(message);
+
+    return {
+      conversationId: conversation.conversationId,
+      aiResponse: 'Mensagem enfileirada para processamento.',
+      action: 'continue',
+      metadata: {
+        queued: true,
+        pendingMessages:
+          this.pendingConversations.get(phoneNormalized)?.messages.length ?? 0,
+      },
+    };
+  }
+
+  private queueMessageForDebounce(
+    message: WhatsAppMessage,
+    jid?: string,
+  ): void {
+    const conversationKey = this.normalizePhone(message.from);
+    const existing = this.pendingConversations.get(conversationKey);
+    const pending = existing ?? {
+      conversationId:
+        this.conversationStateService.getOrCreateConversation(conversationKey)
+          .conversationId,
+      jid,
+      messages: [],
+      status: 'PENDING',
+    };
+
+    pending.messages.push(message);
+    pending.jid = jid ?? pending.jid;
+
+    if (pending.status === 'PROCESSING') {
+      this.pendingConversations.set(conversationKey, pending);
+      this.logger.log(
+        `[WhatsApp] Mensagem recebida durante processamento ativo para ${pending.conversationId}`,
+      );
+      return;
+    }
+
+    if (pending.timer) {
+      clearTimeout(pending.timer);
+    }
+
+    pending.timer = setTimeout(() => {
+      void this.flushPendingTurn(conversationKey);
+    }, this.debounceMs);
+
+    this.pendingConversations.set(conversationKey, pending);
+
+    this.logger.log(
+      `[WhatsApp] AGUARDANDO MENSAGENS\n   Conversa: ${pending.conversationId}\n   Mensagens pendentes: ${pending.messages.length}`,
+    );
+    this.logger.log(
+      `[WhatsApp] DEBOUNCE RESET\n   Conversa: ${pending.conversationId}\n   Mensagens pendentes: ${pending.messages.length}`,
+    );
+  }
+
+  private async flushPendingTurn(conversationKey: string): Promise<void> {
+    const pending = this.pendingConversations.get(conversationKey);
+
+    if (!pending || pending.status === 'PROCESSING') {
+      return;
+    }
+
+    pending.status = 'PROCESSING';
+    pending.timer = undefined;
+
+    const batch = [...pending.messages];
+    pending.messages = [];
+
+    this.logger.log(
+      `[WhatsApp] PROCESSANDO TURNO\n   Conversa: ${pending.conversationId}\n   Mensagens: ${batch.length}`,
+    );
 
     try {
-      // Get or create conversation
-      const conversation =
-        this.conversationStateService.getOrCreateConversation(phoneNormalized);
+      await this.processTurn(pending.conversationId, batch, pending.jid);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(
+        `[WhatsApp] Erro ao processar turno: ${pending.conversationId}\n   Erro: ${message}`,
+      );
+    } finally {
+      const current = this.pendingConversations.get(conversationKey);
 
-      const conversationId = conversation.conversationId;
+      if (current && current.messages.length > 0) {
+        current.status = 'PENDING';
+        current.timer = setTimeout(() => {
+          void this.flushPendingTurn(conversationKey);
+        }, this.debounceMs);
+        this.logger.log(
+          `[WhatsApp] DEBOUNCE RESET\n   Conversa: ${current.conversationId}\n   Mensagens pendentes: ${current.messages.length}`,
+        );
+        return;
+      }
 
-      // Add user message to history
+      this.pendingConversations.delete(conversationKey);
+    }
+  }
+
+  private async processTurn(
+    conversationId: string,
+    batch: WhatsAppMessage[],
+    jid?: string,
+  ): Promise<ProcessMessageResult> {
+    const conversation =
+      this.conversationStateService.getConversation(conversationId);
+    const state =
+      conversation ??
+      this.conversationStateService.getOrCreateConversation(
+        conversationId.replace(/_\d+$/, ''),
+      );
+
+    const previousHistory = this.conversationStateService.getMessageHistory(
+      state.conversationId,
+    );
+
+    for (const message of batch) {
       this.conversationStateService.addMessageToHistory(
-        conversationId,
+        state.conversationId,
         'client',
         message.text,
       );
-
-      // Prepare context for AI - convert to AIMessage format
-      const messageHistory = conversation.messageHistory.map(
-        (msg): AIMessage => ({
-          role:
-            msg.role === 'client'
-              ? 'user'
-              : msg.role === 'bot'
-                ? 'assistant'
-                : 'user',
-          content: msg.content,
-        }),
-      );
-
-      const conversationContext = {
-        conversationId,
-        messages: messageHistory,
-        systemPrompt: this.aiService.getSystemPrompt(),
-        metadata: {
-          stage: conversation.currentStage,
-          intention: conversation.lastIntention,
-          customerName: conversation.client?.firstName,
-        },
-      };
-
-      // Process message with AI
-      const aiResult = await this.aiService.processMessage(
-        message.text,
-        conversationContext,
-      );
-
-      // Add AI response to history
-      this.conversationStateService.addMessageToHistory(
-        conversationId,
-        'bot',
-        aiResult.message,
-      );
-
-      // Determine next stage and actions based on AI response
-      const action = this.determineNextAction(
-        message.text,
-        aiResult.message,
-        conversation,
-      );
-
-      // Execute any required booking queries
-      // (This will be enhanced based on AI intent extraction)
-      if (action === 'escalate') {
-        this.conversationStateService.markForHumanHandover(conversationId);
-        this.logger.log(`Conversation ${conversationId} marked for escalation`);
-      }
-
-      // Update conversation state
-      const nextStage = this.getNextStage(conversation.currentStage, action);
-      this.conversationStateService.updateStage(conversationId, nextStage);
-
-      return {
-        conversationId,
-        aiResponse: aiResult.message,
-        action,
-        metadata: {
-          stage: conversation.currentStage,
-          messageCount: conversation.messageHistory.length,
-        },
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Error processing message: ${message}`);
-      throw new BadRequestException(`Message processing failed: ${message}`);
     }
+
+    const userMessageText = batch
+      .map((message) => message.text.trim())
+      .filter(Boolean)
+      .join(' ');
+
+    const conversationContext = {
+      conversationId: state.conversationId,
+      messages: previousHistory.map((msg): AIMessage => ({
+        role:
+          msg.role === 'client'
+            ? 'user'
+            : msg.role === 'bot'
+              ? 'assistant'
+              : 'user',
+        content: msg.content,
+      })),
+      systemPrompt: this.aiService.getSystemPrompt(),
+      metadata: {
+        stage: state.currentStage,
+        intention: state.lastIntention,
+        customerName: state.client?.firstName,
+        clientData: state.client,
+        schedulingData: state.scheduling,
+        recentHistory: this.conversationStateService
+          .getMessageHistory(state.conversationId)
+          .slice(-10),
+      },
+    };
+
+    this.logger.log(
+      `[AI] PROCESSANDO TURNO\n   Conversa: ${state.conversationId}\n   Mensagens agrupadas: ${batch.length}`,
+    );
+
+    const aiResult = await this.aiService.processMessage(
+      userMessageText,
+      conversationContext,
+    );
+
+    this.conversationStateService.addMessageToHistory(
+      state.conversationId,
+      'bot',
+      aiResult.message,
+    );
+
+    const action = this.determineNextAction(
+      userMessageText,
+      aiResult.message,
+      state,
+    );
+
+    if (action === 'escalate') {
+      this.conversationStateService.markForHumanHandover(state.conversationId);
+    }
+
+    const nextStage = this.getNextStage(state.currentStage, action);
+    this.conversationStateService.updateStage(state.conversationId, nextStage);
+
+    const result: ProcessMessageResult = {
+      conversationId: state.conversationId,
+      aiResponse: aiResult.message,
+      action,
+      metadata: {
+        stage: state.currentStage,
+        messageCount: this.conversationStateService.getMessageHistory(
+          state.conversationId,
+        ).length,
+      },
+    };
+
+    if (jid) {
+      await this.sendResponseViaBaileys(jid, aiResult.message);
+    }
+
+    return result;
   }
 
   /**
@@ -358,5 +488,13 @@ export class WhatsAppService implements OnModuleInit {
   getConversationSummary(conversationId: string): any {
     return this.conversationStateService.getSummary(conversationId);
   }
-}
 
+  onModuleDestroy(): void {
+    for (const pending of this.pendingConversations.values()) {
+      if (pending.timer) {
+        clearTimeout(pending.timer);
+      }
+    }
+    this.pendingConversations.clear();
+  }
+}

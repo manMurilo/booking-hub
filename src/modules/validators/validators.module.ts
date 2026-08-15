@@ -6,7 +6,7 @@ import { NameValidator } from './name.validator';
 /**
  * Módulo de Validadores
  * Exporta validadores para uso em toda a aplicação
- * 
+ *
  * Validadores disponíveis:
  * - CpfValidator: valida CPF com algoritmo oficial
  * - PhoneValidator: valida telefones brasileiros

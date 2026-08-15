@@ -41,9 +41,7 @@ export class AIService {
       return prompt;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.warn(
-        `Could not load system prompt from file: ${message}`,
-      );
+      this.logger.warn(`Could not load system prompt from file: ${message}`);
       return 'You are a helpful WhatsApp bot assistant.';
     }
   }
@@ -112,7 +110,8 @@ export class AIService {
     // Build conversation history for Interactions API
     // Gemini Interactions API expects messages in parts format
     const contents = messages.map((msg) => ({
-      role: msg.role === 'system' || msg.role === 'assistant' ? 'model' : 'user',
+      role:
+        msg.role === 'system' || msg.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: msg.content }],
     }));
 
@@ -162,27 +161,26 @@ export class AIService {
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
         const errorMessage =
-          errorData?.error?.message ||
-          errorData?.error ||
-          response.statusText;
+          errorData?.error?.message || errorData?.error || response.statusText;
 
         // Handle specific error types
-        if (
-          errorMessage &&
-          typeof errorMessage === 'string'
-        ) {
+        if (errorMessage && typeof errorMessage === 'string') {
           if (
             errorMessage.includes('API_KEY_INVALID') ||
             errorMessage.includes('UNAUTHENTICATED')
           ) {
-            this.logger.error('[AI] Erro de autenticação: API key inválida ou expirada');
+            this.logger.error(
+              '[AI] Erro de autenticação: API key inválida ou expirada',
+            );
             throw new Error('Authentication error: Invalid or expired API key');
           }
           if (
             errorMessage.includes('not found') ||
             errorMessage.includes('no longer available')
           ) {
-            this.logger.error(`[AI] Modelo não disponível: ${this.config.model}`);
+            this.logger.error(
+              `[AI] Modelo não disponível: ${this.config.model}`,
+            );
             throw new Error(
               `Model "${this.config.model}" is not available. Verify model name at https://ai.google.dev/`,
             );
@@ -206,9 +204,8 @@ export class AIService {
 
       // Extract response from Interactions API format
       // Priority: output_text > candidates[0].content.parts[0].text
-      let assistantMessage =
-        data.output_text ||
-        data.candidates?.[0]?.content?.parts?.[0]?.text;
+      const assistantMessage =
+        data.output_text || data.candidates?.[0]?.content?.parts?.[0]?.text;
 
       if (!assistantMessage) {
         this.logger.error(
@@ -217,12 +214,19 @@ export class AIService {
         throw new Error('No message in LLM response');
       }
 
-      this.logger.debug(`[AI] Resposta recebida do Gemini: ${assistantMessage.substring(0, 50)}...`);
+      this.logger.debug(
+        `[AI] Resposta recebida do Gemini: ${assistantMessage.substring(0, 50)}...`,
+      );
       return assistantMessage;
     } catch (error) {
       if (error instanceof Error) {
-        if (error.message.includes('fetch failed') || error.message.includes('ECONNREFUSED')) {
-          this.logger.error('[AI] Erro de conexão: não conseguiu conectar à API Gemini');
+        if (
+          error.message.includes('fetch failed') ||
+          error.message.includes('ECONNREFUSED')
+        ) {
+          this.logger.error(
+            '[AI] Erro de conexão: não conseguiu conectar à API Gemini',
+          );
           throw new Error('Network error: Could not connect to Gemini API');
         }
         this.logger.error(`[AI] Erro ao chamar Gemini: ${error.message}`);

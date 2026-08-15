@@ -171,8 +171,14 @@ export class AgendamentosService {
         body: JSON.stringify(payload),
       });
     } catch (error) {
-      this.logger.error('Failed to communicate with Trinks API while updating an appointment', error as Error);
-      throw new HttpException('Failed to communicate with Trinks API', HttpStatus.BAD_GATEWAY);
+      this.logger.error(
+        'Failed to communicate with Trinks API while updating an appointment',
+        error as Error,
+      );
+      throw new HttpException(
+        'Failed to communicate with Trinks API',
+        HttpStatus.BAD_GATEWAY,
+      );
     }
 
     // Expecting 204 No Content on success
@@ -186,25 +192,51 @@ export class AgendamentosService {
     try {
       parsed = responseText ? JSON.parse(responseText) : {};
     } catch (error) {
-      this.logger.error('Invalid JSON received from Trinks API while updating an appointment', error as Error);
-      throw new HttpException('Invalid response from Trinks API', HttpStatus.BAD_GATEWAY);
+      this.logger.error(
+        'Invalid JSON received from Trinks API while updating an appointment',
+        error as Error,
+      );
+      throw new HttpException(
+        'Invalid response from Trinks API',
+        HttpStatus.BAD_GATEWAY,
+      );
     }
 
     switch (response.status) {
       case HttpStatus.UNAUTHORIZED:
       case HttpStatus.FORBIDDEN:
-        throw new HttpException('Trinks API authentication or authorization failed', HttpStatus.BAD_GATEWAY);
+        throw new HttpException(
+          'Trinks API authentication or authorization failed',
+          HttpStatus.BAD_GATEWAY,
+        );
       case HttpStatus.BAD_REQUEST:
       case 422:
-        throw new HttpException(parsed || 'Bad request to Trinks API', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          parsed || 'Bad request to Trinks API',
+          HttpStatus.BAD_REQUEST,
+        );
       case HttpStatus.NOT_FOUND:
-        throw new HttpException('Trinks resource not found', HttpStatus.NOT_FOUND);
+        throw new HttpException(
+          'Trinks resource not found',
+          HttpStatus.NOT_FOUND,
+        );
       case HttpStatus.TOO_MANY_REQUESTS:
-        this.logger.warn('Trinks rate limit reached (HTTP 429). No retry will be performed.');
-        throw new HttpException('Trinks rate limit reached', HttpStatus.TOO_MANY_REQUESTS);
+        this.logger.warn(
+          'Trinks rate limit reached (HTTP 429). No retry will be performed.',
+        );
+        throw new HttpException(
+          'Trinks rate limit reached',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
       default:
-        this.logger.error(`Trinks API returned unexpected status ${response.status}`, parsed as Error);
-        throw new HttpException('Trinks API returned an unexpected error', HttpStatus.BAD_GATEWAY);
+        this.logger.error(
+          `Trinks API returned unexpected status ${response.status}`,
+          parsed as Error,
+        );
+        throw new HttpException(
+          'Trinks API returned an unexpected error',
+          HttpStatus.BAD_GATEWAY,
+        );
     }
   }
 
@@ -235,8 +267,14 @@ export class AgendamentosService {
         body: JSON.stringify(payload),
       });
     } catch (error) {
-      this.logger.error('Failed to communicate with Trinks API while cancelling an appointment', error as Error);
-      throw new HttpException('Failed to communicate with Trinks API', HttpStatus.BAD_GATEWAY);
+      this.logger.error(
+        'Failed to communicate with Trinks API while cancelling an appointment',
+        error as Error,
+      );
+      throw new HttpException(
+        'Failed to communicate with Trinks API',
+        HttpStatus.BAD_GATEWAY,
+      );
     }
 
     // Expecting 204 No Content on success
@@ -250,41 +288,85 @@ export class AgendamentosService {
     try {
       parsed = responseText ? JSON.parse(responseText) : {};
     } catch (error) {
-      this.logger.error('Invalid JSON received from Trinks API while cancelling an appointment', error as Error);
-      throw new HttpException('Invalid response from Trinks API', HttpStatus.BAD_GATEWAY);
+      this.logger.error(
+        'Invalid JSON received from Trinks API while cancelling an appointment',
+        error as Error,
+      );
+      throw new HttpException(
+        'Invalid response from Trinks API',
+        HttpStatus.BAD_GATEWAY,
+      );
     }
 
     switch (response.status) {
       case HttpStatus.UNAUTHORIZED:
       case HttpStatus.FORBIDDEN:
-        throw new HttpException('Trinks API authentication or authorization failed', HttpStatus.BAD_GATEWAY);
+        throw new HttpException(
+          'Trinks API authentication or authorization failed',
+          HttpStatus.BAD_GATEWAY,
+        );
       case HttpStatus.BAD_REQUEST:
       case 422:
-        throw new HttpException(parsed || 'Bad request to Trinks API', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          parsed || 'Bad request to Trinks API',
+          HttpStatus.BAD_REQUEST,
+        );
       case HttpStatus.NOT_FOUND:
-        throw new HttpException('Trinks resource not found', HttpStatus.NOT_FOUND);
+        throw new HttpException(
+          'Trinks resource not found',
+          HttpStatus.NOT_FOUND,
+        );
       case HttpStatus.TOO_MANY_REQUESTS:
-        this.logger.warn('Trinks rate limit reached (HTTP 429). No retry will be performed.');
-        throw new HttpException('Trinks rate limit reached', HttpStatus.TOO_MANY_REQUESTS);
+        this.logger.warn(
+          'Trinks rate limit reached (HTTP 429). No retry will be performed.',
+        );
+        throw new HttpException(
+          'Trinks rate limit reached',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
       default:
-        this.logger.error(`Trinks API returned unexpected status ${response.status}`, parsed as Error);
-        throw new HttpException('Trinks API returned an unexpected error', HttpStatus.BAD_GATEWAY);
+        this.logger.error(
+          `Trinks API returned unexpected status ${response.status}`,
+          parsed as Error,
+        );
+        throw new HttpException(
+          'Trinks API returned an unexpected error',
+          HttpStatus.BAD_GATEWAY,
+        );
     }
   }
 
   async validateLocalAgendamentoRules(
     payload: TrinksCreateAgendamentoPayload,
   ): Promise<TrinksCreateAgendamentoPayload> {
-    if (!payload || typeof payload.servicoId !== 'number' || payload.servicoId <= 0) {
-      throw new BadRequestException('servicoId é obrigatório e deve ser maior que zero.');
+    if (
+      !payload ||
+      typeof payload.servicoId !== 'number' ||
+      payload.servicoId <= 0
+    ) {
+      throw new BadRequestException(
+        'servicoId é obrigatório e deve ser maior que zero.',
+      );
     }
 
-    if (!payload || typeof payload.clienteId !== 'number' || payload.clienteId <= 0) {
-      throw new BadRequestException('clienteId é obrigatório e deve ser maior que zero.');
+    if (
+      !payload ||
+      typeof payload.clienteId !== 'number' ||
+      payload.clienteId <= 0
+    ) {
+      throw new BadRequestException(
+        'clienteId é obrigatório e deve ser maior que zero.',
+      );
     }
 
-    if (!payload || typeof payload.dataHoraInicio !== 'string' || !payload.dataHoraInicio) {
-      throw new BadRequestException('dataHoraInicio é obrigatório e deve ser string.');
+    if (
+      !payload ||
+      typeof payload.dataHoraInicio !== 'string' ||
+      !payload.dataHoraInicio
+    ) {
+      throw new BadRequestException(
+        'dataHoraInicio é obrigatório e deve ser string.',
+      );
     }
 
     const dataHoraInicio = new Date(payload.dataHoraInicio);
@@ -297,19 +379,27 @@ export class AgendamentosService {
       Number.isNaN(payload.duracaoEmMinutos) ||
       payload.duracaoEmMinutos <= 0
     ) {
-      throw new BadRequestException('duracaoEmMinutos deve ser maior que zero.');
+      throw new BadRequestException(
+        'duracaoEmMinutos deve ser maior que zero.',
+      );
     }
 
     try {
       await this.clientesService.getClientePorId(payload.clienteId);
     } catch (error) {
-      throw new UnprocessableEntityException('Cliente não encontrado na Trinks.');
+      throw new UnprocessableEntityException(
+        'Cliente não encontrado na Trinks.',
+      );
     }
 
     const servicos = await this.servicosService.getServicos({});
-    const servico = servicos?.data?.find((item: any) => item.id === payload.servicoId);
+    const servico = servicos?.data?.find(
+      (item: any) => item.id === payload.servicoId,
+    );
     if (!servico) {
-      throw new UnprocessableEntityException('Serviço não encontrado na Trinks.');
+      throw new UnprocessableEntityException(
+        'Serviço não encontrado na Trinks.',
+      );
     }
 
     if (
@@ -317,7 +407,9 @@ export class AgendamentosService {
       payload.profissionalId === null ||
       Number.isNaN(Number(payload.profissionalId))
     ) {
-      throw new UnprocessableEntityException('Profissional é obrigatório para o agendamento.');
+      throw new UnprocessableEntityException(
+        'Profissional é obrigatório para o agendamento.',
+      );
     }
 
     const profissionais = await this.profissionaisService.getProfissionais({});
@@ -325,7 +417,9 @@ export class AgendamentosService {
       (item: any) => item.id === payload.profissionalId,
     );
     if (!profissional) {
-      throw new UnprocessableEntityException('Profissional não encontrado na Trinks.');
+      throw new UnprocessableEntityException(
+        'Profissional não encontrado na Trinks.',
+      );
     }
 
     const data = `${dataHoraInicio.getFullYear()}-${String(

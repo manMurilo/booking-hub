@@ -1,4 +1,9 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ClientesService } from '../../integrations/trinks/clientes/clientes.service';
 import { AgendamentosService } from '../../integrations/trinks/agendamentos/agendamentos.service';
 import { PlanosService } from '../../integrations/trinks/planos/planos.service';
@@ -47,7 +52,9 @@ export class BookingService {
    * @param telefone - Telefone normalizado (13 dígitos com DDI)
    * @returns Resultado da busca
    */
-  async findClienteByPhoneNumber(telefone: string): Promise<FindClienteResponse> {
+  async findClienteByPhoneNumber(
+    telefone: string,
+  ): Promise<FindClienteResponse> {
     // Valida telefone
     const { isValid, normalized } = PhoneValidator.validate(telefone);
 
@@ -87,7 +94,8 @@ export class BookingService {
         cliente: resultado,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erro desconhecido';
+      const message =
+        error instanceof Error ? error.message : 'Erro desconhecido';
       this.logger.error(`Erro ao buscar cliente por telefone: ${message}`);
       throw new BadRequestException('Erro ao buscar cliente');
     }
@@ -133,7 +141,8 @@ export class BookingService {
         },
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erro desconhecido';
+      const message =
+        error instanceof Error ? error.message : 'Erro desconhecido';
       this.logger.error(`Erro ao buscar cliente por CPF: ${message}`);
       throw new BadRequestException('Erro ao buscar cliente');
     }
@@ -177,7 +186,8 @@ export class BookingService {
         totalDisponivel: slots.length,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erro desconhecido';
+      const message =
+        error instanceof Error ? error.message : 'Erro desconhecido';
       this.logger.error(`Erro ao buscar agenda para ${data}: ${message}`);
       throw new BadRequestException('Erro ao buscar disponibilidade');
     }
@@ -198,7 +208,8 @@ export class BookingService {
     dataFim?: string,
   ): Promise<AvailabilityMultipleDaysResponse> {
     try {
-      const profissionaisResponse = await this.profissionaisService.getProfissionais({});
+      const profissionaisResponse =
+        await this.profissionaisService.getProfissionais({});
       const profissional = profissionaisResponse?.data?.find(
         (p: any) => p.id === profissionalId,
       );
@@ -208,7 +219,9 @@ export class BookingService {
       }
 
       const servicosResponse = await this.servicosService.getServicos({});
-      const servico = servicosResponse?.data?.find((s: any) => s.id === servicoId);
+      const servico = servicosResponse?.data?.find(
+        (s: any) => s.id === servicoId,
+      );
 
       if (!servico) {
         throw new NotFoundException('Serviço não encontrado');
@@ -222,7 +235,9 @@ export class BookingService {
       }
 
       if (start > end) {
-        throw new BadRequestException('dataInicio não pode ser maior que dataFim');
+        throw new BadRequestException(
+          'dataInicio não pode ser maior que dataFim',
+        );
       }
 
       const dias: AvailabilityResponse[] = [];
@@ -242,11 +257,15 @@ export class BookingService {
         dias,
       };
     } catch (error) {
-      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException
+      ) {
         throw error;
       }
 
-      const message = error instanceof Error ? error.message : 'Erro desconhecido';
+      const message =
+        error instanceof Error ? error.message : 'Erro desconhecido';
       this.logger.error(`Erro ao buscar agenda múltiplos dias: ${message}`);
       throw new BadRequestException('Erro ao buscar disponibilidade');
     }
@@ -278,7 +297,8 @@ export class BookingService {
         total: planosFormatados.length,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erro desconhecido';
+      const message =
+        error instanceof Error ? error.message : 'Erro desconhecido';
       this.logger.error(`Erro ao listar planos: ${message}`);
       throw new BadRequestException('Erro ao listar planos');
     }
@@ -307,7 +327,8 @@ export class BookingService {
         total: servicosFormatados.length,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erro desconhecido';
+      const message =
+        error instanceof Error ? error.message : 'Erro desconhecido';
       this.logger.error(`Erro ao listar serviços: ${message}`);
       throw new BadRequestException('Erro ao listar serviços');
     }
@@ -336,7 +357,8 @@ export class BookingService {
         total: profissionaisFormatados.length,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erro desconhecido';
+      const message =
+        error instanceof Error ? error.message : 'Erro desconhecido';
       this.logger.error(`Erro ao listar profissionais: ${message}`);
       throw new BadRequestException('Erro ao listar profissionais');
     }
@@ -381,8 +403,12 @@ export class BookingService {
         };
       }
 
-      const profissionais = await this.profissionaisService.getProfissionais({});
-      const profissional = profissionais?.data?.find((p: any) => p.id === profissionalId);
+      const profissionais = await this.profissionaisService.getProfissionais(
+        {},
+      );
+      const profissional = profissionais?.data?.find(
+        (p: any) => p.id === profissionalId,
+      );
       if (!profissional) {
         return {
           valid: false,
@@ -390,7 +416,9 @@ export class BookingService {
         };
       }
 
-      const duracaoEmMinutos = Number(servico.duracaoEmMinutos ?? servico.duracao ?? 0);
+      const duracaoEmMinutos = Number(
+        servico.duracaoEmMinutos ?? servico.duracao ?? 0,
+      );
       const valor = Number(servico.preco ?? 0);
       const requestPayload = {
         servicoId,
@@ -403,7 +431,9 @@ export class BookingService {
         confirmado: false,
       };
 
-      await this.agendamentosService.validateLocalAgendamentoRules(requestPayload);
+      await this.agendamentosService.validateLocalAgendamentoRules(
+        requestPayload,
+      );
 
       return {
         valid: true,
@@ -413,7 +443,10 @@ export class BookingService {
         dataHora,
       };
     } catch (error) {
-      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException
+      ) {
         return {
           valid: false,
           reason: error.message,
@@ -425,7 +458,8 @@ export class BookingService {
         };
       }
 
-      const message = error instanceof Error ? error.message : 'Erro desconhecido';
+      const message =
+        error instanceof Error ? error.message : 'Erro desconhecido';
       this.logger.error(`Erro ao validar agendamento: ${message}`);
       throw new BadRequestException('Erro ao validar agendamento');
     }
@@ -439,7 +473,14 @@ export class BookingService {
     valor?: number;
     observacoes?: string;
   }): Promise<any> {
-    const { clienteId, servicoId, profissionalId, dataHora, valor, observacoes } = payload;
+    const {
+      clienteId,
+      servicoId,
+      profissionalId,
+      dataHora,
+      valor,
+      observacoes,
+    } = payload;
 
     const servicos = await this.servicosService.getServicos({});
     const servico = servicos?.data?.find((item: any) => item.id === servicoId);
@@ -453,12 +494,16 @@ export class BookingService {
     }
 
     const profissionais = await this.profissionaisService.getProfissionais({});
-    const profissional = profissionais?.data?.find((item: any) => item.id === profissionalId);
+    const profissional = profissionais?.data?.find(
+      (item: any) => item.id === profissionalId,
+    );
     if (!profissional) {
       throw new NotFoundException('Profissional não encontrado');
     }
 
-    const duracaoEmMinutos = Number(servico.duracaoEmMinutos ?? servico.duracao ?? 0);
+    const duracaoEmMinutos = Number(
+      servico.duracaoEmMinutos ?? servico.duracao ?? 0,
+    );
     const requestPayload = {
       servicoId,
       clienteId,
@@ -470,11 +515,14 @@ export class BookingService {
       confirmado: false,
     };
 
-    await this.agendamentosService.validateLocalAgendamentoRules(requestPayload);
+    await this.agendamentosService.validateLocalAgendamentoRules(
+      requestPayload,
+    );
 
     const preparedRequest =
       this.agendamentosService.prepareCreateAgendamentoRequest(requestPayload);
-    const created = await this.agendamentosService.createAgendamento(preparedRequest);
+    const created =
+      await this.agendamentosService.createAgendamento(preparedRequest);
 
     return {
       created: true,

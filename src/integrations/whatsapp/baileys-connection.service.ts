@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -23,12 +28,19 @@ import {
 } from './whatsapp-integration.types';
 
 @Injectable()
-export class BaileysConnectionService implements IWhatsAppConnection, OnModuleInit, OnModuleDestroy {
+export class BaileysConnectionService
+  implements IWhatsAppConnection, OnModuleInit, OnModuleDestroy
+{
   private readonly logger = new Logger(BaileysConnectionService.name);
   private sock: WASocket | null = null;
-  private connectionState: WhatsAppConnectionState = WhatsAppConnectionState.DISCONNECTED;
-  private messageHandlers: Array<(message: WhatsAppIncomingMessage) => Promise<void>> = [];
-  private connectionStateHandlers: Array<(event: WhatsAppConnectionEvent) => void> = [];
+  private connectionState: WhatsAppConnectionState =
+    WhatsAppConnectionState.DISCONNECTED;
+  private messageHandlers: Array<
+    (message: WhatsAppIncomingMessage) => Promise<void>
+  > = [];
+  private connectionStateHandlers: Array<
+    (event: WhatsAppConnectionEvent) => void
+  > = [];
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private readonly authDir = path.join(process.cwd(), '.whatsapp-auth');
   private isShuttingDown = false;
@@ -56,7 +68,9 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
   private ensureAuthDirExists(): void {
     if (!fs.existsSync(this.authDir)) {
       fs.mkdirSync(this.authDir, { recursive: true });
-      this.logger.debug(`[WhatsApp] Diretório de autenticação criado: ${this.authDir}`);
+      this.logger.debug(
+        `[WhatsApp] Diretório de autenticação criado: ${this.authDir}`,
+      );
     }
   }
 
@@ -66,7 +80,10 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
       return;
     }
 
-    this.updateConnectionState(WhatsAppConnectionState.CONNECTING, 'Conectando ao WhatsApp...');
+    this.updateConnectionState(
+      WhatsAppConnectionState.CONNECTING,
+      'Conectando ao WhatsApp...',
+    );
 
     try {
       const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
@@ -82,10 +99,18 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
       });
 
       this.sock.ev.on('creds.update', saveCreds);
-      this.sock.ev.on('connection.update', (update) => this.handleConnectionUpdate(update));
-      this.sock.ev.on('messages.upsert', (event) => this.handleMessagesUpsert(event));
-      this.sock.ev.on('messages.update', (updates) => this.handleMessagesUpdate(updates));
-      this.sock.ev.on('message-receipt.update', (updates) => this.handleMessageReceiptUpdate(updates));
+      this.sock.ev.on('connection.update', (update) =>
+        this.handleConnectionUpdate(update),
+      );
+      this.sock.ev.on('messages.upsert', (event) =>
+        this.handleMessagesUpsert(event),
+      );
+      this.sock.ev.on('messages.update', (updates) =>
+        this.handleMessagesUpdate(updates),
+      );
+      this.sock.ev.on('message-receipt.update', (updates) =>
+        this.handleMessageReceiptUpdate(updates),
+      );
 
       await new Promise<void>((resolve) => {
         const checkConnection = () => {
@@ -98,11 +123,16 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
         checkConnection();
       });
 
-      this.logger.log(`[WhatsApp] Conectado como ${this.sock?.user?.name || this.sock?.user?.id || 'usuário'}`);
+      this.logger.log(
+        `[WhatsApp] Conectado como ${this.sock?.user?.name || this.sock?.user?.id || 'usuário'}`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`[WhatsApp] Erro na conexão: ${message}`);
-      this.updateConnectionState(WhatsAppConnectionState.DISCONNECTED, `Erro: ${message}`);
+      this.updateConnectionState(
+        WhatsAppConnectionState.DISCONNECTED,
+        `Erro: ${message}`,
+      );
       throw error;
     }
   }
@@ -111,13 +141,21 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      this.logger.warn('[WhatsApp] QR Code disponível - escaneie com o WhatsApp');
-      this.updateConnectionState(WhatsAppConnectionState.QR_REQUIRED, 'Escaneie o QR Code com o WhatsApp');
+      this.logger.warn(
+        '[WhatsApp] QR Code disponível - escaneie com o WhatsApp',
+      );
+      this.updateConnectionState(
+        WhatsAppConnectionState.QR_REQUIRED,
+        'Escaneie o QR Code com o WhatsApp',
+      );
       this.displayQRCode(qr);
     }
 
     if (connection === 'connecting') {
-      this.updateConnectionState(WhatsAppConnectionState.CONNECTING, 'Conectando ao WhatsApp...');
+      this.updateConnectionState(
+        WhatsAppConnectionState.CONNECTING,
+        'Conectando ao WhatsApp...',
+      );
       return;
     }
 
@@ -127,7 +165,10 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
 
       if (!wasLoggedOut && !this.isShuttingDown) {
         this.logger.warn('[WhatsApp] Conexão perdida, tentando reconectar...');
-        this.updateConnectionState(WhatsAppConnectionState.RECONNECTING, 'Reconectando...');
+        this.updateConnectionState(
+          WhatsAppConnectionState.RECONNECTING,
+          'Reconectando...',
+        );
         this.sock = null;
 
         if (this.reconnectTimeout) {
@@ -136,7 +177,8 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
 
         this.reconnectTimeout = setTimeout(() => {
           this.connect().catch((err) => {
-            const message = err instanceof Error ? err.message : 'Unknown error';
+            const message =
+              err instanceof Error ? err.message : 'Unknown error';
             this.logger.error(`[WhatsApp] Erro na reconexão: ${message}`);
           });
         }, 3000);
@@ -145,7 +187,9 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
 
       this.logger.log('[Baileys] Sessão encerrada');
       this.updateConnectionState(
-        wasLoggedOut ? WhatsAppConnectionState.LOGGED_OUT : WhatsAppConnectionState.DISCONNECTED,
+        wasLoggedOut
+          ? WhatsAppConnectionState.LOGGED_OUT
+          : WhatsAppConnectionState.DISCONNECTED,
         wasLoggedOut ? 'Logout definitivo' : 'Desconectado',
       );
       this.sock = null;
@@ -154,11 +198,17 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
 
     if (connection === 'open') {
       this.logger.log('[WhatsApp] Conectado com sucesso');
-      this.updateConnectionState(WhatsAppConnectionState.CONNECTED, 'Conectado');
+      this.updateConnectionState(
+        WhatsAppConnectionState.CONNECTED,
+        'Conectado',
+      );
     }
   }
 
-  private async handleMessagesUpsert(event: { messages: WAMessage[]; type: string }) {
+  private async handleMessagesUpsert(event: {
+    messages: WAMessage[];
+    type: string;
+  }) {
     if (event.type !== 'notify') {
       return;
     }
@@ -174,12 +224,20 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
         }
 
         const remoteJid = message.key.remoteJid;
-        if (!remoteJid || remoteJid.includes('@g.us') || remoteJid === 'status@broadcast') {
-          this.logger.debug('[WhatsApp] Ignorando mensagem fora do escopo do MVP');
+        if (
+          !remoteJid ||
+          remoteJid.includes('@g.us') ||
+          remoteJid === 'status@broadcast'
+        ) {
+          this.logger.debug(
+            '[WhatsApp] Ignorando mensagem fora do escopo do MVP',
+          );
           continue;
         }
 
-        const text = message.message?.conversation || message.message?.extendedTextMessage?.text;
+        const text =
+          message.message?.conversation ||
+          message.message?.extendedTextMessage?.text;
         if (!text) {
           this.logger.debug('[WhatsApp] Ignorando mensagem sem texto');
           continue;
@@ -192,7 +250,9 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
           jid,
           sender,
           text,
-          timestamp: Number(message.messageTimestamp || Math.floor(Date.now() / 1000)),
+          timestamp: Number(
+            message.messageTimestamp || Math.floor(Date.now() / 1000),
+          ),
           messageId: message.key.id || '',
           isFromBot: false,
           isGroupMessage: false,
@@ -212,18 +272,24 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
           try {
             await handler(incomingMessage);
           } catch (error) {
-            const errMessage = error instanceof Error ? error.message : 'Unknown error';
-            this.logger.error(`[WhatsApp] Erro ao processar mensagem recebida: ${errMessage}`);
+            const errMessage =
+              error instanceof Error ? error.message : 'Unknown error';
+            this.logger.error(
+              `[WhatsApp] Erro ao processar mensagem recebida: ${errMessage}`,
+            );
           }
         }
       } catch (error) {
-        const errMessage = error instanceof Error ? error.message : 'Unknown error';
+        const errMessage =
+          error instanceof Error ? error.message : 'Unknown error';
         this.logger.error(`[WhatsApp] Erro ao extrair mensagem: ${errMessage}`);
       }
     }
   }
 
-  private handleMessagesUpdate(updates: Array<{ key: WAMessageKey; update: Partial<WAMessage> }>) {
+  private handleMessagesUpdate(
+    updates: Array<{ key: WAMessageKey; update: Partial<WAMessage> }>,
+  ) {
     for (const update of updates) {
       const { key, update: messageUpdate } = update;
       const status = messageUpdate.status;
@@ -246,7 +312,13 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
   }
 
   private handleMessageReceiptUpdate(
-    updates: Array<{ key: WAMessageKey; receipt: { readTimestamp?: number | null | unknown; receiptTimestamp?: number | null | unknown } }>,
+    updates: Array<{
+      key: WAMessageKey;
+      receipt: {
+        readTimestamp?: number | null | unknown;
+        receiptTimestamp?: number | null | unknown;
+      };
+    }>,
   ) {
     for (const update of updates) {
       const messageId = update.key.id || '(sem id)';
@@ -263,15 +335,21 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     }
   }
 
-  onMessage(callback: (message: WhatsAppIncomingMessage) => Promise<void>): void {
+  onMessage(
+    callback: (message: WhatsAppIncomingMessage) => Promise<void>,
+  ): void {
     this.messageHandlers.push(callback);
   }
 
-  onConnectionStateChange(callback: (event: WhatsAppConnectionEvent) => void): void {
+  onConnectionStateChange(
+    callback: (event: WhatsAppConnectionEvent) => void,
+  ): void {
     this.connectionStateHandlers.push(callback);
   }
 
-  async sendMessage(message: WhatsAppOutgoingMessage): Promise<WhatsAppSendResult> {
+  async sendMessage(
+    message: WhatsAppOutgoingMessage,
+  ): Promise<WhatsAppSendResult> {
     if (!this.sock || !this.isConnected()) {
       return {
         messageId: '',
@@ -287,7 +365,9 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
         throw new Error('Grupos não são permitidos no envio');
       }
 
-      const result = await this.sock.sendMessage(destinationJid, { text: message.text });
+      const result = await this.sock.sendMessage(destinationJid, {
+        text: message.text,
+      });
       const messageId = result?.key?.id || '';
 
       this.logger.log(
@@ -302,7 +382,8 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
         status: 'pending',
       };
     } catch (error) {
-      const errMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errMessage =
+        error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(
         `❌ WHATSAPP — ERRO AO ENVIAR\n` +
           `   Para: ${message.to}\n` +
@@ -325,10 +406,14 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
       return this.sendMessage(message);
     }
 
-    const quotedMessage = this.messageCache.get(`${this.normalizeJid(quoted.jid)}:${quoted.messageId}`);
+    const quotedMessage = this.messageCache.get(
+      `${this.normalizeJid(quoted.jid)}:${quoted.messageId}`,
+    );
     const payload = {
       ...message,
-      quoted: quotedMessage ? { jid: quoted.jid, messageId: quoted.messageId } : undefined,
+      quoted: quotedMessage
+        ? { jid: quoted.jid, messageId: quoted.messageId }
+        : undefined,
     };
 
     return this.sendMessage(payload);
@@ -348,9 +433,12 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
       };
 
       await this.sock.readMessages([key]);
-      this.logger.log(`👁 WHATSAPP — MARCADA COMO LIDA\n   Para: ${targetJid}\n   Message ID: ${messageId}`);
+      this.logger.log(
+        `👁 WHATSAPP — MARCADA COMO LIDA\n   Para: ${targetJid}\n   Message ID: ${messageId}`,
+      );
     } catch (error) {
-      const errMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errMessage =
+        error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(
         `❌ WHATSAPP — ERRO AO MARCAR COMO LIDA\n` +
           `   Para: ${jid}\n` +
@@ -360,7 +448,10 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     }
   }
 
-  async sendPresence(type: 'composing' | 'paused' | 'available' | 'unavailable', jid?: string): Promise<void> {
+  async sendPresence(
+    type: 'composing' | 'paused' | 'available' | 'unavailable',
+    jid?: string,
+  ): Promise<void> {
     if (!this.sock || !this.isConnected()) {
       return;
     }
@@ -373,7 +464,8 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
         `[WhatsApp] Presence enviada: ${type}${target ? ` para ${target}` : ''}`,
       );
     } catch (error) {
-      const errMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errMessage =
+        error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`[WhatsApp] Erro ao enviar presença: ${errMessage}`);
     }
   }
@@ -383,7 +475,10 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
   }
 
   isConnected(): boolean {
-    return this.connectionState === WhatsAppConnectionState.CONNECTED && !!this.sock?.user;
+    return (
+      this.connectionState === WhatsAppConnectionState.CONNECTED &&
+      !!this.sock?.user
+    );
   }
 
   async disconnect(): Promise<void> {
@@ -394,11 +489,16 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     try {
       this.sock.end(new Error('Temporary disconnect'));
       this.sock = null;
-      this.updateConnectionState(WhatsAppConnectionState.DISCONNECTED, 'Desconectado temporariamente');
+      this.updateConnectionState(
+        WhatsAppConnectionState.DISCONNECTED,
+        'Desconectado temporariamente',
+      );
       this.logger.log('[WhatsApp] Conexão temporária encerrada');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`[WhatsApp] Erro ao desconectar temporariamente: ${message}`);
+      this.logger.error(
+        `[WhatsApp] Erro ao desconectar temporariamente: ${message}`,
+      );
     }
   }
 
@@ -410,7 +510,10 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     try {
       await this.sock.logout();
       this.sock = null;
-      this.updateConnectionState(WhatsAppConnectionState.LOGGED_OUT, 'Logout definitivo');
+      this.updateConnectionState(
+        WhatsAppConnectionState.LOGGED_OUT,
+        'Logout definitivo',
+      );
       this.logger.log('[WhatsApp] Logout efetuado');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -433,10 +536,16 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     }
 
     this.sock = null;
-    this.updateConnectionState(WhatsAppConnectionState.DISCONNECTED, 'Encerrado');
+    this.updateConnectionState(
+      WhatsAppConnectionState.DISCONNECTED,
+      'Encerrado',
+    );
   }
 
-  private updateConnectionState(state: WhatsAppConnectionState, message: string): void {
+  private updateConnectionState(
+    state: WhatsAppConnectionState,
+    message: string,
+  ): void {
     this.connectionState = state;
     const event: WhatsAppConnectionEvent = {
       state,
@@ -448,8 +557,11 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
       try {
         handler(event);
       } catch (error) {
-        const errMessage = error instanceof Error ? error.message : 'Unknown error';
-        this.logger.error(`[WhatsApp] Erro ao executar handler de conexão: ${errMessage}`);
+        const errMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+        this.logger.error(
+          `[WhatsApp] Erro ao executar handler de conexão: ${errMessage}`,
+        );
       }
     }
   }
