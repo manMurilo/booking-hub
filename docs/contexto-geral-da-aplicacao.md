@@ -35,7 +35,8 @@ Não existe atualmente:
 - microsserviços;
 - rate limiter complexo;
 - retry automático para a Trinks;
-- autenticação própria de usuários/clientes.
+- autenticação própria de usuários/clientes;
+- infraestrutura de testes automatizados.
 
 O estado de conversas utilizado pelo protótipo fica em memória.
 
@@ -54,7 +55,6 @@ A regra é simples:
 - Swagger / OpenAPI
 - `class-validator`
 - `class-transformer`
-- Jest disponível no projeto, com testes automatizados existentes
 
 ## 4. Estrutura atual
 
