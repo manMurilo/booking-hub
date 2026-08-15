@@ -49,7 +49,7 @@ export class ConversationFlowOrchestrator {
 
     // Fluxo inicial - sem intenção definida
     if (context.step === ConversationStep.INITIAL) {
-      return this.handleInitialStep(context);
+      return this.handleInitialStep();
     }
 
     // Fluxo de identificação de intenção
@@ -98,25 +98,18 @@ export class ConversationFlowOrchestrator {
 
   /**
    * Etapa inicial - primeira mensagem do cliente
-   * A IA deve interpretar a intenção, backend aguarda isso
+   * Não identificar cliente logo de cara
+   * Seguir o fluxo documentado: primeiro determinar intenção, depois identificar se necessário
+   * Ver: docs/fluxo-conversacional.md - "A necessidade de identificação depende da intenção"
    */
-  private handleInitialStep(context: ConversationContext): FlowDecision {
-    // Se cliente não foi identificado, identificar primeiro
-    if (!context.client.identified) {
-      return this.createDecision(
-        ConversationStep.CLIENT_IDENTIFICATION,
-        PendingAction.CONSULT_TRINKS,
-        undefined,
-        'Cliente não identificado. Consultando Trinks pelo telefone.',
-      );
-    }
-
-    // Cliente identificado, aguardar intenção da IA
+  private handleInitialStep(): FlowDecision {
+    // Ir diretamente para AWAITING_INTENTION
+    // O cliente será identificado SÓ se a intenção exigir (ex: BOOKING, SUPPORT)
     return this.createDecision(
       ConversationStep.AWAITING_INTENTION,
-      PendingAction.WAIT_USER_RESPONSE,
-      undefined,
-      'Aguardando IA interpretar intenção do cliente.',
+      PendingAction.ASK_USER,
+      'Olá! Como posso te ajudar?',
+      'Primeira mensagem. Aguardando que o cliente revele sua intenção.',
     );
   }
 

@@ -19,6 +19,8 @@ import { BaileysConnectionService } from '../../integrations/whatsapp/baileys-co
 import { WhatsAppMessageAdapterService } from '../../integrations/whatsapp/whatsapp-message-adapter.service';
 import { WhatsAppIncomingMessage } from '../../integrations/whatsapp/whatsapp-integration.types';
 import { TrinksAvailabilityExecutor } from '../conversation-state/trinks-availability-executor.service';
+import { DeterministicMessageInterpreter } from '../message-interpreter/message-interpreter.service';
+import { MessageContextUpdaterService } from '../message-interpreter/message-context-updater.service';
 
 type PendingConversationBatch = {
   conversationId: string;
@@ -55,6 +57,8 @@ export class WhatsAppService implements OnModuleInit {
     private trinksAvailabilityExecutor: TrinksAvailabilityExecutor,
     private baileysConnectionService: BaileysConnectionService,
     private messageAdapterService: WhatsAppMessageAdapterService,
+    private messageInterpreter: DeterministicMessageInterpreter,
+    private messageContextUpdater: MessageContextUpdaterService,
   ) {}
 
   /**
@@ -297,8 +301,31 @@ export class WhatsAppService implements OnModuleInit {
     );
 
     // Converter ConversationState para ConversationContext (novo)
-    const conversationContext =
+    let conversationContext =
       this.conversationStateService.toConversationContext(state);
+
+    // Interpretar mensagens do usuário e atualizar contexto
+    for (const message of batch) {
+      const structuredMessage = await this.messageInterpreter.interpret(
+        message.text,
+        { conversation: conversationContext },
+      );
+
+      this.logger.debug(
+        `[MessageInterpreter] Interpretada mensagem\n` +
+          `   Texto: "${message.text}"\n` +
+          `   Intent: ${structuredMessage.intent}\n` +
+          `   Service: ${structuredMessage.service}\n` +
+          `   Date: ${structuredMessage.date}\n` +
+          `   Time: ${structuredMessage.time}`,
+      );
+
+      conversationContext =
+        this.messageContextUpdater.updateContextFromStructuredMessage(
+          conversationContext,
+          structuredMessage,
+        );
+    }
 
     // Chamar orchestrator para determinar próximo passo
     const flowDecision =
@@ -450,10 +477,9 @@ export class WhatsAppService implements OnModuleInit {
           };
         }
 
+        // Se houver messageToUser, usar. Caso contrário, usar message vazia ou padrão seguro
         return {
-          responseText:
-            messageToUser ||
-            'Consultando informações... Um momento, por favor.',
+          responseText: messageToUser || '',
           context: {
             ...context,
             step: decision.nextStep,

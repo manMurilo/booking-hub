@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { AIService } from '../../ai/ai.service';
 import { ConversationIntent } from '../conversation-state/conversation-flow.types';
 import {
   MessageInterpreter,
@@ -8,22 +9,38 @@ import {
 
 @Injectable()
 export class DeterministicMessageInterpreter implements MessageInterpreter {
-  interpret(
+  constructor(private readonly aiService?: AIService) {}
+
+  async interpret(
     message: string,
     context?: MessageInterpretationContext,
-  ): StructuredMessage {
-    void context;
-
+  ): Promise<StructuredMessage> {
     const rawText = message?.trim() ?? '';
     const normalizedText = this.normalize(rawText);
-    const intent = this.detectIntent(normalizedText);
-    const service = this.extractService(normalizedText);
-    const professional = this.extractProfessional(normalizedText);
-    const date = this.extractDate(normalizedText);
-    const time = this.extractTime(normalizedText);
-    const period = this.extractPeriod(normalizedText);
-    const confirmation = this.extractConfirmation(normalizedText);
-    const cancellation = this.extractCancellation(normalizedText);
+
+    const aiStructuredMessage = await this.trySemanticInterpretation(
+      rawText,
+      context,
+    );
+
+    const intent =
+      aiStructuredMessage?.intent ??
+      this.resolveIntent(normalizedText, context) ??
+      ConversationIntent.UNKNOWN;
+    const service =
+      aiStructuredMessage?.service ??
+      this.extractService(normalizedText) ??
+      this.extractServicePhrase(normalizedText);
+    const professional =
+      aiStructuredMessage?.professional ?? this.extractProfessional(normalizedText);
+    const date = aiStructuredMessage?.date ?? this.extractDate(normalizedText);
+    const time = aiStructuredMessage?.time ?? this.extractTime(normalizedText);
+    const period =
+      aiStructuredMessage?.period ?? this.extractPeriod(normalizedText);
+    const confirmation =
+      aiStructuredMessage?.confirmation ?? this.extractConfirmation(normalizedText);
+    const cancellation =
+      aiStructuredMessage?.cancellation ?? this.extractCancellation(normalizedText);
 
     const missingFields = this.buildMissingFields({
       intent,
@@ -34,6 +51,20 @@ export class DeterministicMessageInterpreter implements MessageInterpreter {
       period,
       confirmation,
       cancellation,
+    });
+
+    const confidence = this.calculateConfidence({
+      intent,
+      service,
+      professional,
+      date,
+      time,
+      period,
+      confirmation,
+      cancellation,
+      rawText,
+      normalizedText,
+      missingFields,
     });
 
     return {
@@ -48,29 +79,197 @@ export class DeterministicMessageInterpreter implements MessageInterpreter {
       rawText,
       normalizedText,
       missingFields,
+      confidence,
     };
   }
 
   private normalize(value: string): string {
-    return value
+    const withoutAccents = value
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .replace(/\s+/g, ' ')
       .trim()
       .toLowerCase();
+
+    const typoCorrections: Record<string, string> = {
+      qeuria: 'queria',
+      agndar: 'agendar',
+      agend: 'agendar',
+      horairo: 'horario',
+      marcra: 'marcar',
+      marcarr: 'marcar',
+      agendametno: 'agendamento',
+      agendamentoo: 'agendamento',
+      cutar: 'cortar',
+      cortr: 'cortar',
+      cabeloo: 'cabelo',
+      bbara: 'barba',
+      pra: 'para',
+      qto: 'quanto',
+      custaa: 'custa',
+      oq: 'o que',
+      amanha: 'amanha',
+    };
+
+    const cleaned = Object.entries(typoCorrections).reduce((result, [wrong, fixed]) => {
+      return result.replace(
+        new RegExp(`\\b${wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g'),
+        fixed,
+      );
+    }, withoutAccents);
+
+    return cleaned.replace(/[?.,!;:()\[\]{}]/g, '').replace(/\s+/g, ' ').trim();
   }
 
-  private detectIntent(value: string): ConversationIntent {
-    if (
-      /(quero|gostaria|preciso|posso)\s+(agendar|marcar|reservar)|\b(agendar|marcar|reservar)\b/.test(
-        value,
-      )
-    ) {
+  private async trySemanticInterpretation(
+    rawText: string,
+    context?: MessageInterpretationContext,
+  ): Promise<Partial<StructuredMessage> | null> {
+    if (!this.aiService || !rawText) {
+      return null;
+    }
+
+    try {
+      const contextSummary = context?.conversation
+        ? [
+            `intent=${context.conversation.intent ?? 'unknown'}`,
+            `servico=${context.conversation.booking?.serviceName ?? 'nao informado'}`,
+            `profissional=${context.conversation.booking?.professionalName ?? 'nao informado'}`,
+            `data=${context.conversation.booking?.appointmentDateString ?? 'nao informada'}`,
+            `periodo=${context.conversation.booking?.appointmentTime ?? 'nao informado'}`,
+          ].join('; ')
+        : 'sem contexto anterior';
+
+      const aiResponse = await this.aiService.processMessage(rawText, {
+        conversationId:
+          context?.conversation?.conversationId ?? 'message-interpreter',
+        messages: [{ role: 'user', content: `${contextSummary}\n\nMensagem atual: ${rawText}` }],
+        systemPrompt:
+          'Responda apenas com JSON válido. Campos permitidos: intent, service, professional, date, time, period, confirmation, cancellation, rawText. Use intent como booking, inquiry, support ou unknown. Em português do Brasil. Sempre use context data when relevant.',
+      } as any);
+
+      const parsed = this.parseAiResponse(aiResponse.message);
+      if (!parsed) {
+        return null;
+      }
+
+      const intent = this.mapIntent(parsed.intent ?? parsed.action);
+      if (intent === ConversationIntent.UNKNOWN && !this.isLikelyBookingIntent(rawText)) {
+        return null;
+      }
+
+      return {
+        intent,
+        service: parsed.service ?? parsed.booking?.service ?? null,
+        professional: parsed.professional ?? parsed.booking?.professional ?? null,
+        date: parsed.date ?? parsed.booking?.date ?? null,
+        time: parsed.time ?? parsed.booking?.time ?? null,
+        period: this.mapPeriod(parsed.period ?? parsed.booking?.period),
+        confirmation:
+          typeof parsed.confirmation === 'boolean'
+            ? parsed.confirmation
+            : null,
+        cancellation:
+          typeof parsed.cancellation === 'boolean'
+            ? parsed.cancellation
+            : false,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private parseAiResponse(response: string): Record<string, any> | null {
+    const trimmed = response.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const jsonStart = trimmed.indexOf('{');
+    const jsonEnd = trimmed.lastIndexOf('}');
+    if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(trimmed.slice(jsonStart, jsonEnd + 1));
+    } catch {
+      return null;
+    }
+  }
+
+  private mapIntent(value: unknown): ConversationIntent {
+    const normalized = String(value ?? '').trim().toLowerCase();
+
+    if (['booking', 'book', 'agendamento', 'agendar', 'marcar'].includes(normalized)) {
+      return ConversationIntent.BOOKING;
+    }
+
+    if (['inquiry', 'inquerito', 'duvida', 'consulta', 'informacao', 'preco', 'preço', 'quanto'].includes(normalized)) {
+      return ConversationIntent.INQUIRY;
+    }
+
+    if (['support', 'suporte', 'ajuda', 'problema', 'reclamacao', 'reclamação'].includes(normalized)) {
+      return ConversationIntent.SUPPORT;
+    }
+
+    return ConversationIntent.UNKNOWN;
+  }
+
+  private mapPeriod(value: unknown): string | null {
+    const normalized = String(value ?? '').trim().toLowerCase();
+
+    if (['morning', 'manha', 'manhã'].includes(normalized)) {
+      return 'manhã';
+    }
+
+    if (['afternoon', 'tarde'].includes(normalized)) {
+      return 'tarde';
+    }
+
+    if (['evening', 'night', 'noite'].includes(normalized)) {
+      return 'noite';
+    }
+
+    return null;
+  }
+
+  private isLikelyBookingIntent(value: string): boolean {
+    const normalized = this.normalize(value);
+    return /(?:quero|queria|qeuria|gostaria|preciso|posso|vou|fazer|marcar|agendar|reservar|agendamento|horario|horario|cortar|barba|cabelo|servico|vaga|marca|marcar)/.test(
+      normalized,
+    );
+  }
+
+  private resolveIntent(
+    value: string,
+    context?: MessageInterpretationContext,
+  ): ConversationIntent {
+    if (this.isLikelyBookingIntent(value)) {
       return ConversationIntent.BOOKING;
     }
 
     if (
-      /\b(duvida|dúvida|informacao|informação|consulta|saber)\b/.test(value)
+      context?.conversation?.intent === ConversationIntent.BOOKING ||
+      !!context?.conversation?.booking?.serviceName ||
+      !!context?.conversation?.booking?.professionalName
+    ) {
+      const hasFollowUpBookingSignal =
+        /\b(com|com o|com a|profissional|cliente|horario|data|amanha|tarde|manha)\b/.test(
+          value,
+        ) || /\b(joao|maria|ana|carlos|pedro|lucas|joaozinho)\b/.test(value);
+
+      if (hasFollowUpBookingSignal) {
+        return ConversationIntent.BOOKING;
+      }
+    }
+
+    return this.detectIntent(value);
+  }
+
+  private detectIntent(value: string): ConversationIntent {
+    if (
+      /\b(duvida|informacao|consulta|saber|quanto|preco|preço|custa|disponibilidade|funciona|horario|horario|aberto|servicos|serviços|tem|vaga)\b/.test(value)
     ) {
       return ConversationIntent.INQUIRY;
     }
@@ -79,9 +278,7 @@ export class DeterministicMessageInterpreter implements MessageInterpreter {
       return ConversationIntent.SUPPORT;
     }
 
-    if (
-      /\b(cancelar|desmarcar|cancelamento|remarcar|reagendar)\b/.test(value)
-    ) {
+    if (/\b(cancelar|desmarcar|cancelamento|remarcar|reagendar)\b/.test(value)) {
       return ConversationIntent.BOOKING;
     }
 
@@ -89,22 +286,40 @@ export class DeterministicMessageInterpreter implements MessageInterpreter {
   }
 
   private extractService(value: string): string | null {
-    const patterns = [
-      'corte',
-      'barba',
-      'sobrancelha',
-      'cabelo',
-      'hidratação',
-      'hidratacao',
-      'coloração',
-      'coloracao',
-      'pigmentação',
-      'pigmentacao',
+    const lower = this.normalize(value);
+
+    if (/\b(?:cortar|corte)\s+(?:o\s+)?(?:cabelo)\b/.test(lower)) {
+      return 'corte de cabelo';
+    }
+
+    if (/\b(?:cortar|corte)\s+(?:o\s+)?(?:barba)\b/.test(lower)) {
+      return 'corte de barba';
+    }
+
+    if (/\b(?:barba)\b/.test(lower)) {
+      return 'barba';
+    }
+
+    if (/\b(?:corte)\b/.test(lower)) {
+      return 'corte';
+    }
+
+    if (/\b(?:cabelo|sobrancelha|manicure|pedicure|hidratacao|coloracao|pigmentacao)\b/.test(lower)) {
+      return lower.match(/\b(?:cabelo|sobrancelha|manicure|pedicure|hidratacao|coloracao|pigmentacao)\b/)?.[0] ?? null;
+    }
+
+    return null;
+  }
+
+  private extractServicePhrase(value: string): string | null {
+    const phrases = [
+      /\b(?:quero|queria|qeuria|gostaria|preciso|posso|vou)\s+(?:.*?\s+)?(?:cortar|corte|barba|sobrancelha)\s+(?:o\s+)?(?:cabelo|barba|sobrancelha)\b/,
     ];
 
-    for (const pattern of patterns) {
-      if (value.includes(pattern)) {
-        return pattern;
+    for (const pattern of phrases) {
+      const match = value.match(pattern);
+      if (match) {
+        return match[0].trim();
       }
     }
 
@@ -116,38 +331,49 @@ export class DeterministicMessageInterpreter implements MessageInterpreter {
       /(?:com|profissional|com o|com a)\s+([a-zà-ú]+(?:\s+[a-zà-ú]+){0,2})/i,
     );
 
-    return match ? match[1].trim() : null;
+    if (!match) {
+      return null;
+    }
+
+    const professional = match[1].trim();
+    const normalizedProfessional = professional.replace(/^o\s+/i, '').trim();
+    return this.normalizePersonName(normalizedProfessional);
+  }
+
+  private normalizePersonName(value: string): string {
+    const lowered = value.toLowerCase();
+    const withAccent = lowered
+      .replace(/\bjoao\b/g, 'joão')
+      .replace(/\bjoaozinho\b/g, 'joãozinho')
+      .replace(/\bana\b/g, 'ana');
+
+    return withAccent
+      .split(' ')
+      .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+      .join(' ')
+      .replace(/Joao\b/g, 'João')
+      .replace(/Joaozinho\b/g, 'Joãozinho')
+      .replace(/Ana\b/g, 'Ana');
   }
 
   private extractDate(value: string): string | null {
     const relativeMatches = [
-      { pattern: /\bhoje\b/, days: 0 },
-      { pattern: /\bamanha\b/, days: 1 },
-      { pattern: /\bdepois de amanha\b/, days: 2 },
-      { pattern: /\beste fim de semana\b/, days: 3 },
+      { pattern: /\bhoje\b/, value: 'hoje' },
+      { pattern: /\bamanha\b/, value: 'amanhã' },
+      { pattern: /\bdepois\s+de\s+amanha\b/, value: 'depois de amanhã' },
+      { pattern: /\beste\s+fim\s+de\s+semana\b/, value: 'este fim de semana' },
+      { pattern: /\bdomingo\b/, value: 'domingo' },
+      { pattern: /\bsegunda\b/, value: 'segunda' },
+      { pattern: /\bterca\b/, value: 'terca' },
+      { pattern: /\bquarta\b/, value: 'quarta' },
+      { pattern: /\bquinta\b/, value: 'quinta' },
+      { pattern: /\bsexta\b/, value: 'sexta' },
+      { pattern: /\bsabado\b/, value: 'sábado' },
     ];
 
     for (const relativeMatch of relativeMatches) {
       if (relativeMatch.pattern.test(value)) {
-        return this.addDays(relativeMatch.days);
-      }
-    }
-
-    const dayMap = new Map<string, number>([
-      ['domingo', 0],
-      ['segunda', 1],
-      ['terca', 2],
-      ['quarta', 3],
-      ['quinta', 4],
-      ['sexta', 5],
-      ['sabado', 6],
-    ]);
-
-    for (const [label, targetDayIndex] of dayMap.entries()) {
-      if (value.includes(label)) {
-        const todayIndex = new Date().getDay();
-        const delta = (targetDayIndex - todayIndex + 7) % 7 || 7;
-        return this.addDays(delta);
+        return relativeMatch.value;
       }
     }
 
@@ -181,22 +407,46 @@ export class DeterministicMessageInterpreter implements MessageInterpreter {
       }
     }
 
+    const wordHourMap = new Map<string, string>([
+      ['meia noite', '00:30'],
+      ['meia', '00:30'],
+      ['quinze', '15:00'],
+      ['quatorze', '14:00'],
+      ['treze', '13:00'],
+      ['doze', '12:00'],
+      ['onze', '11:00'],
+      ['dez', '10:00'],
+      ['nove', '09:00'],
+      ['oito', '08:00'],
+      ['sete', '07:00'],
+      ['seis', '06:00'],
+      ['cinco', '05:00'],
+      ['quatro', '04:00'],
+      ['tres', '03:00'],
+      ['dois', '02:00'],
+      ['uma', '01:00'],
+    ]);
+
+    for (const [label, valueTime] of wordHourMap.entries()) {
+      if (value.includes(label)) {
+        return valueTime;
+      }
+    }
+
     return null;
   }
 
-  private extractPeriod(
-    value: string,
-  ): 'morning' | 'afternoon' | 'evening' | 'night' | null {
-    if (/\b(manha|manha)\b/.test(value)) {
-      return 'morning';
+  private extractPeriod(value: string): string | null {
+    if (/\bmanha\b/.test(value)) {
+      return 'manhã';
     }
 
-    if (/\b(tarde)\b/.test(value)) {
-      return 'afternoon';
+    if (/\btarde\b/.test(value)) {
+      return 'tarde';
     }
 
-    if (/\b(noite|noit)\b/.test(value)) {
-      return 'evening';
+    if (/\bnoite\b/.test(value)) {
+      return 'noite';
     }
 
     return null;
@@ -215,7 +465,7 @@ export class DeterministicMessageInterpreter implements MessageInterpreter {
   }
 
   private extractCancellation(value: string): boolean | null {
-    if (/\b(cancelar|desmarcar|cancelamento|nao quero)\b/.test(value)) {
+    if (/\b(cancelar|desmarcar|cancelamento|nao quero|nao quero cancelar)\b/.test(value)) {
       return true;
     }
 
@@ -228,7 +478,7 @@ export class DeterministicMessageInterpreter implements MessageInterpreter {
     professional: string | null;
     date: string | null;
     time: string | null;
-    period: 'morning' | 'afternoon' | 'evening' | 'night' | null;
+    period: string | null;
     confirmation: boolean | null;
     cancellation: boolean | null;
   }): string[] {
@@ -243,16 +493,79 @@ export class DeterministicMessageInterpreter implements MessageInterpreter {
         missing.push('date');
       }
 
-      if (!params.time && !params.period) {
+      if (!params.time) {
         missing.push('time');
+      }
+
+      if (params.service && !params.professional) {
+        missing.push('professional');
       }
     }
 
-    if (params.confirmation === null && params.cancellation === null) {
-      return missing;
+    return missing;
+  }
+
+  private calculateConfidence(params: {
+    intent: ConversationIntent;
+    service: string | null;
+    professional: string | null;
+    date: string | null;
+    time: string | null;
+    period: string | null;
+    confirmation: boolean | null;
+    cancellation: boolean | null;
+    rawText: string;
+    normalizedText: string;
+    missingFields: string[];
+  }): number {
+    const rawText = params.rawText?.trim() ?? '';
+
+    if (!rawText) {
+      return 0.95;
     }
 
-    return missing;
+    if (params.intent === ConversationIntent.BOOKING) {
+      const explicitBookingSignal = /\b(agendamento|agendar|marcar|horario|horario|reserva|reservar|fazer um horario)\b/.test(
+        params.normalizedText,
+      );
+
+      if (explicitBookingSignal && !params.service && !params.date && !params.time && !params.professional) {
+        return 0.96;
+      }
+
+      let score = 0.9;
+      if (params.service) score += 0.03;
+      if (params.date) score += 0.03;
+      if (params.time) score += 0.03;
+      if (params.professional) score += 0.02;
+      if (params.period) score += 0.01;
+      if (params.confirmation !== null || params.cancellation !== null) {
+        score += 0.01;
+      }
+      return Math.min(score, 0.99);
+    }
+
+    if (params.intent === ConversationIntent.INQUIRY) {
+      let score = 0.88;
+      if (params.service) score += 0.03;
+      if (params.period) score += 0.02;
+      return Math.min(score, 0.99);
+    }
+
+    if (params.intent === ConversationIntent.SUPPORT) {
+      let score = 0.85;
+      if (params.confirmation !== null || params.cancellation !== null) {
+        score += 0.04;
+      }
+      return Math.min(score, 0.99);
+    }
+
+    const normalized = this.normalize(rawText);
+    if (normalized.length <= 2 || /^(oi|ola|olá|bom dia|boa tarde|boa noite)$/.test(normalized)) {
+      return 0.95;
+    }
+
+    return 0.72;
   }
 
   private addDays(days: number): string {

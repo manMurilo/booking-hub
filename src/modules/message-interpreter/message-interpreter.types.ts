@@ -13,7 +13,7 @@ export interface StructuredMessage {
   professional?: string | null;
   date?: string | null;
   time?: string | null;
-  period?: 'morning' | 'afternoon' | 'evening' | 'night' | null;
+  period?: string | null;
   customer?: {
     name?: string | null;
     phone?: string | null;
@@ -24,11 +24,12 @@ export interface StructuredMessage {
   rawText: string;
   normalizedText: string;
   missingFields: string[];
+  confidence: number;
 }
 
 export interface MessageInterpreter {
   interpret(
     message: string,
     context?: MessageInterpretationContext,
-  ): StructuredMessage;
+  ): Promise<StructuredMessage>;
 }
