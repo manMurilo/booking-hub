@@ -153,24 +153,18 @@ export class WhatsAppController {
   @Post('test-message')
   async testMessage(
     @Body() body: { phone: string; text: string },
-  ): Promise<{ status: string; messageId: string; timestamp: Date; error?: string }> {
+  ): Promise<ProcessMessageResult> {
     if (!body.phone || !body.text) {
       throw new BadRequestException('Missing phone or text');
     }
 
-    const normalizedPhone = body.phone.replace(/\D/g, '');
-    if (!normalizedPhone || normalizedPhone.length < 10) {
-      throw new BadRequestException('Phone must be a valid WhatsApp contact number');
-    }
-
-    if (normalizedPhone.length >= 12 && normalizedPhone.includes('@g.us')) {
-      throw new BadRequestException('Group JID is not allowed for the isolated test message');
-    }
-
-    return this.baileysConnectionService.sendMessage({
-      to: normalizedPhone,
+    const message: WhatsAppMessage = {
+      from: body.phone,
       text: body.text,
-    });
+      timestamp: Date.now(),
+    };
+
+    return this.whatsAppService.processMessage(message);
   }
 
   /**

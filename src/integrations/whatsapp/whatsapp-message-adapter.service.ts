@@ -48,6 +48,7 @@ export class WhatsAppMessageAdapterService {
   prepareOutgoingMessage(to: string, text: string): WhatsAppOutgoingMessage {
     return {
       to,
+      jid: to,
       text,
     };
   }

@@ -93,8 +93,8 @@ export class WhatsAppService implements OnModuleInit {
         `   Resposta: "${result.aiResponse.substring(0, 100)}${result.aiResponse.length > 100 ? '...' : ''}"`,
       );
 
-      // Enviar resposta de volta
-      await this.sendResponseViaBaileys(whatsAppMessage.from, result.aiResponse);
+      // Enviar resposta de volta usando o JID original da conversa
+      await this.sendResponseViaBaileys(baileysMessage.jid, result.aiResponse);
 
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -104,16 +104,15 @@ export class WhatsAppService implements OnModuleInit {
         `   Erro: ${message}`,
       );
       
-      // Enviar mensagem de erro (se a origem estiver disponível)
-      if (baileysMessage.sender) {
+      // Enviar mensagem de erro para o mesmo JID da conversa
+      if (baileysMessage.jid) {
         try {
-          const phoneNumber = this.messageAdapterService.normalizePhoneNumber(baileysMessage.sender);
           const errorMessage = `Desculpe, ocorreu um erro ao processar sua mensagem. Tente novamente mais tarde.`;
-          await this.sendResponseViaBaileys(baileysMessage.sender, errorMessage);
+          await this.sendResponseViaBaileys(baileysMessage.jid, errorMessage);
         } catch (sendError) {
           this.logger.error(
             `❌ WHATSAPP — ERRO AO ENVIAR MENSAGEM DE ERRO\n` +
-            `   Para: ${baileysMessage.sender}`,
+            `   Para: ${baileysMessage.jid}`,
           );
         }
       }

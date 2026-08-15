@@ -185,7 +185,7 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
           continue;
         }
 
-        const jid = this.normalizeJid(remoteJid);
+        const jid = remoteJid;
         const sender = this.toPhoneNumber(jid);
 
         const incomingMessage: WhatsAppIncomingMessage = {
@@ -282,13 +282,12 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     }
 
     try {
-      const destinationJid = this.normalizeJid(message.to);
+      const destinationJid = message.jid || this.normalizeJid(message.to);
       if (destinationJid.includes('@g.us')) {
-        throw new Error('Grupos não são permitidos no teste isolado de envio');
+        throw new Error('Grupos não são permitidos no envio');
       }
 
-      const sendOptions = this.buildSendOptions(message);
-      const result = await this.sock.sendMessage(destinationJid, { text: message.text }, sendOptions);
+      const result = await this.sock.sendMessage(destinationJid, { text: message.text });
       const messageId = result?.key?.id || '';
 
       this.logger.log(
@@ -479,22 +478,6 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     }
 
     return jid.split('@')[0].replace(/\D/g, '');
-  }
-
-  private buildSendOptions(message: WhatsAppOutgoingMessage): Record<string, unknown> | undefined {
-    if (!message.quoted?.jid || !message.quoted?.messageId) {
-      return undefined;
-    }
-
-    const quotedMessageKey = `${this.normalizeJid(message.quoted.jid)}:${message.quoted.messageId}`;
-    const quotedMessage = this.messageCache.get(quotedMessageKey);
-    if (!quotedMessage) {
-      return undefined;
-    }
-
-    return {
-      quoted: quotedMessage,
-    };
   }
 
   private mapStatusToLabel(status: number): string | undefined {
