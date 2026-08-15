@@ -31,5 +31,14 @@ import { TrinksService } from './trinks.service';
     ProfissionaisService,
     ServicosService,
   ],
+  exports: [
+    TrinksService,
+    AgendamentosService,
+    AssinaturasService,
+    ClientesService,
+    PlanosService,
+    ProfissionaisService,
+    ServicosService,
+  ],
 })
 export class TrinksModule {}

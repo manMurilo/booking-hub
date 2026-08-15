@@ -56,12 +56,6 @@ export class AgendamentosController {
     @Query('excluirExcecoesDeAgendamentoOnline')
     excluirExcecoesDeAgendamentoOnline?: string,
   ): Promise<TrinksAgendaResponse> {
-    if (!data) {
-      throw new BadRequestException(
-        'A query param data é obrigatória para agenda e profissionais agendados.',
-      );
-    }
-
     const servicoIdValue = servicoId ? Number(servicoId) : undefined;
     const servicoDuracaoValue = servicoDuracao
       ? Number(servicoDuracao)
@@ -184,7 +178,7 @@ export class AgendamentosController {
     }
 
     const preparedRequest =
-      await this.agendamentosService.prepareCreateAgendamentoRequest(payload);
+      this.agendamentosService.prepareCreateAgendamentoRequest(payload);
 
     return this.agendamentosService.createAgendamento(preparedRequest);
   }
@@ -205,24 +199,16 @@ export class AgendamentosController {
     }
 
     if (typeof payload.servicoId !== 'number') {
-      throw new BadRequestException(
-        'servicoId é obrigatório e deve ser number.',
-      );
+      throw new BadRequestException('servicoId é obrigatório e deve ser number.');
     }
     if (typeof payload.clienteId !== 'number') {
-      throw new BadRequestException(
-        'clienteId é obrigatório e deve ser number.',
-      );
+      throw new BadRequestException('clienteId é obrigatório e deve ser number.');
     }
     if (typeof payload.dataHoraInicio !== 'string') {
-      throw new BadRequestException(
-        'dataHoraInicio é obrigatório e deve ser string.',
-      );
+      throw new BadRequestException('dataHoraInicio é obrigatório e deve ser string.');
     }
     if (typeof payload.duracaoEmMinutos !== 'number') {
-      throw new BadRequestException(
-        'duracaoEmMinutos é obrigatório e deve ser number.',
-      );
+      throw new BadRequestException('duracaoEmMinutos é obrigatório e deve ser number.');
     }
     if (typeof payload.valor !== 'number') {
       throw new BadRequestException('valor é obrigatório e deve ser number.');
@@ -239,18 +225,16 @@ export class AgendamentosController {
     const idValue = agendamentoId ? Number(agendamentoId) : undefined;
 
     if (idValue === undefined || Number.isNaN(idValue)) {
-      throw new BadRequestException(
-        'agendamentoId é obrigatório e deve ser number.',
-      );
+      throw new BadRequestException('agendamentoId é obrigatório e deve ser number.');
     }
 
     return this.agendamentosService.cancelarAgendamento(idValue, payload ?? {});
   }
 
   @Post('agendamentos/prepare')
-  async prepareCreateAgendamento(
+  prepareCreateAgendamento(
     @Body() payload: TrinksCreateAgendamentoPayload,
-  ): Promise<TrinksCreateAgendamentoRequest> {
+  ): TrinksCreateAgendamentoRequest {
     if (typeof payload.servicoId !== 'number') {
       throw new BadRequestException(
         'servicoId is obrigatório e deve ser number.',

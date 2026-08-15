@@ -1,20 +1,8 @@
-﻿import {
-  BadRequestException,
-  ConflictException,
-  HttpException,
-  HttpStatus,
-  Injectable,
-  Logger,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+﻿import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { TrinksService } from '../trinks.service';
-import { ClientesService } from '../clientes/clientes.service';
-import { ProfissionaisService } from '../profissionais/profissionais.service';
-import { ServicosService } from '../servicos/servicos.service';
 import {
   TrinksAgendamentosResponse,
   TrinksAgendamentosQuery,
-  TrinksAgendaProfessional,
   TrinksAgendaQuery,
   TrinksAgendaResponse,
   TrinksCreateAgendamentoPayload,
@@ -28,210 +16,7 @@ import { CancelamentoAgendamentoModel } from './agendamentos.types';
 export class AgendamentosService {
   private readonly logger = new Logger(AgendamentosService.name);
 
-  constructor(
-    private readonly trinksService: TrinksService,
-    private readonly clientesService: ClientesService,
-    private readonly profissionaisService: ProfissionaisService,
-    private readonly servicosService: ServicosService,
-  ) {}
-
-  private toBrazilianDate(date: Date): string {
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-
-    return `${day}/${month}/${year}`;
-  }
-
-  private parseMinutes(value: string): number {
-    if (!value || !/^\d{1,2}:\d{2}$/.test(value)) {
-      return Number.NaN;
-    }
-
-    const [hours, minutes] = value.split(':').map(Number);
-    if (Number.isNaN(hours) || Number.isNaN(minutes)) {
-      return Number.NaN;
-    }
-
-    return hours * 60 + minutes;
-  }
-
-  private hasAvailableSlot(
-    profissional: TrinksAgendaProfessional,
-    dataHoraInicio: Date,
-    duracaoEmMinutos: number,
-  ): boolean {
-    const horariosVagos = Array.isArray(profissional.horariosVagos)
-      ? profissional.horariosVagos
-      : [];
-
-    if (horariosVagos.length === 0) {
-      return false;
-    }
-
-    const requestedStartMinutes =
-      dataHoraInicio.getHours() * 60 + dataHoraInicio.getMinutes();
-    const requestedEndMinutes = requestedStartMinutes + duracaoEmMinutos;
-
-    return horariosVagos.some((slot) => {
-      if (typeof slot !== 'string') {
-        return false;
-      }
-
-      if (slot.includes('-')) {
-        const [inicio, fim] = slot.split('-');
-        const inicioMinutes = this.parseMinutes(inicio);
-        const fimMinutes = this.parseMinutes(fim);
-
-        if (Number.isNaN(inicioMinutes) || Number.isNaN(fimMinutes)) {
-          return false;
-        }
-
-        return (
-          requestedStartMinutes >= inicioMinutes &&
-          requestedEndMinutes <= fimMinutes
-        );
-      }
-
-      const slotMinutes = this.parseMinutes(slot);
-      if (Number.isNaN(slotMinutes)) {
-        return false;
-      }
-
-      return (
-        requestedStartMinutes >= slotMinutes &&
-        requestedEndMinutes <= slotMinutes + duracaoEmMinutos
-      );
-    });
-  }
-
-  async validateLocalAgendamentoRules(
-    payload: TrinksCreateAgendamentoPayload,
-  ): Promise<void> {
-    this.logger.log(
-      `Validando regras locais de agendamento para cliente ${payload.clienteId} e serviço ${payload.servicoId}.`,
-    );
-
-    if (
-      !Number.isFinite(payload.duracaoEmMinutos) ||
-      payload.duracaoEmMinutos <= 0
-    ) {
-      throw new BadRequestException(
-        'duracaoEmMinutos deve ser maior que zero.',
-      );
-    }
-
-    if (!Number.isFinite(payload.valor) || payload.valor <= 0) {
-      throw new BadRequestException('valor deve ser maior que zero.');
-    }
-
-    const dataHoraInicio = new Date(payload.dataHoraInicio);
-    if (Number.isNaN(dataHoraInicio.getTime())) {
-      throw new BadRequestException(
-        'dataHoraInicio deve ser uma data válida em ISO-8601.',
-      );
-    }
-
-    if (dataHoraInicio.getTime() <= Date.now()) {
-      throw new ConflictException(
-        'dataHoraInicio deve ser maior que a data e hora atuais.',
-      );
-    }
-
-    try {
-      await this.clientesService.getClientePorId(payload.clienteId);
-    } catch (error) {
-      if (error instanceof HttpException) {
-        throw new UnprocessableEntityException(
-          `Cliente ${payload.clienteId} não foi encontrado na Trinks.`,
-        );
-      }
-
-      throw error;
-    }
-
-    const servicosResponse = await this.servicosService.getServicos({
-      id: payload.servicoId,
-    });
-    const servicoExiste = Array.isArray(servicosResponse.data)
-      ? servicosResponse.data.some(
-          (item) => Number(item.id) === payload.servicoId,
-        )
-      : false;
-
-    if (!servicoExiste) {
-      throw new UnprocessableEntityException(
-        `servicoId ${payload.servicoId} não foi encontrado na Trinks.`,
-      );
-    }
-
-    if (
-      payload.profissionalId !== undefined &&
-      payload.profissionalId !== null
-    ) {
-      const profissionaisResponse =
-        await this.profissionaisService.getProfissionais({
-          page: 1,
-          pageSize: 500,
-        });
-      const profissionalExiste = Array.isArray(profissionaisResponse.data)
-        ? profissionaisResponse.data.some(
-            (item) => Number(item.id) === payload.profissionalId,
-          )
-        : false;
-
-      if (!profissionalExiste) {
-        throw new UnprocessableEntityException(
-          `profissionalId ${payload.profissionalId} não foi encontrado na Trinks.`,
-        );
-      }
-
-      const servicosDoProfissional =
-        await this.profissionaisService.getServicosDoProfissional(
-          payload.profissionalId,
-        );
-      const profissionalAtendeServico = servicosDoProfissional.some(
-        (item) =>
-          Number(item.id) === payload.servicoId ||
-          Number(item.servicoId) === payload.servicoId,
-      );
-
-      if (!profissionalAtendeServico) {
-        throw new ConflictException(
-          'O profissional selecionado não atende ao serviço informado.',
-        );
-      }
-
-      const agenda = await this.getAgenda({
-        data: this.toBrazilianDate(dataHoraInicio),
-        servicoId: payload.servicoId,
-        servicoDuracao: payload.duracaoEmMinutos,
-        profissionalId: payload.profissionalId,
-      });
-
-      const profissionalAgenda = Array.isArray(agenda.data)
-        ? agenda.data.find((item) => Number(item.id) === payload.profissionalId)
-        : undefined;
-
-      if (!profissionalAgenda) {
-        throw new ConflictException(
-          'O profissional informado não possui agenda disponível para o horário solicitado.',
-        );
-      }
-
-      const possuiHorarioDisponivel = this.hasAvailableSlot(
-        profissionalAgenda,
-        dataHoraInicio,
-        payload.duracaoEmMinutos,
-      );
-
-      if (!possuiHorarioDisponivel) {
-        throw new ConflictException(
-          'O horário solicitado não está disponível para o profissional selecionado.',
-        );
-      }
-    }
-  }
+  constructor(private readonly trinksService: TrinksService) {}
 
   async getAgendamentos(
     query: TrinksAgendamentosQuery,
@@ -370,14 +155,8 @@ export class AgendamentosService {
         body: JSON.stringify(payload),
       });
     } catch (error) {
-      this.logger.error(
-        'Failed to communicate with Trinks API while updating an appointment',
-        error as Error,
-      );
-      throw new HttpException(
-        'Failed to communicate with Trinks API',
-        HttpStatus.BAD_GATEWAY,
-      );
+      this.logger.error('Failed to communicate with Trinks API while updating an appointment', error as Error);
+      throw new HttpException('Failed to communicate with Trinks API', HttpStatus.BAD_GATEWAY);
     }
 
     // Expecting 204 No Content on success
@@ -391,51 +170,25 @@ export class AgendamentosService {
     try {
       parsed = responseText ? JSON.parse(responseText) : {};
     } catch (error) {
-      this.logger.error(
-        'Invalid JSON received from Trinks API while updating an appointment',
-        error as Error,
-      );
-      throw new HttpException(
-        'Invalid response from Trinks API',
-        HttpStatus.BAD_GATEWAY,
-      );
+      this.logger.error('Invalid JSON received from Trinks API while updating an appointment', error as Error);
+      throw new HttpException('Invalid response from Trinks API', HttpStatus.BAD_GATEWAY);
     }
 
     switch (response.status) {
       case HttpStatus.UNAUTHORIZED:
       case HttpStatus.FORBIDDEN:
-        throw new HttpException(
-          'Trinks API authentication or authorization failed',
-          HttpStatus.BAD_GATEWAY,
-        );
+        throw new HttpException('Trinks API authentication or authorization failed', HttpStatus.BAD_GATEWAY);
       case HttpStatus.BAD_REQUEST:
       case 422:
-        throw new HttpException(
-          parsed || 'Bad request to Trinks API',
-          HttpStatus.BAD_REQUEST,
-        );
+        throw new HttpException(parsed || 'Bad request to Trinks API', HttpStatus.BAD_REQUEST);
       case HttpStatus.NOT_FOUND:
-        throw new HttpException(
-          'Trinks resource not found',
-          HttpStatus.NOT_FOUND,
-        );
+        throw new HttpException('Trinks resource not found', HttpStatus.NOT_FOUND);
       case HttpStatus.TOO_MANY_REQUESTS:
-        this.logger.warn(
-          'Trinks rate limit reached (HTTP 429). No retry will be performed.',
-        );
-        throw new HttpException(
-          'Trinks rate limit reached',
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
+        this.logger.warn('Trinks rate limit reached (HTTP 429). No retry will be performed.');
+        throw new HttpException('Trinks rate limit reached', HttpStatus.TOO_MANY_REQUESTS);
       default:
-        this.logger.error(
-          `Trinks API returned unexpected status ${response.status}`,
-          parsed as Error,
-        );
-        throw new HttpException(
-          'Trinks API returned an unexpected error',
-          HttpStatus.BAD_GATEWAY,
-        );
+        this.logger.error(`Trinks API returned unexpected status ${response.status}`, parsed as Error);
+        throw new HttpException('Trinks API returned an unexpected error', HttpStatus.BAD_GATEWAY);
     }
   }
 
@@ -466,14 +219,8 @@ export class AgendamentosService {
         body: JSON.stringify(payload),
       });
     } catch (error) {
-      this.logger.error(
-        'Failed to communicate with Trinks API while cancelling an appointment',
-        error as Error,
-      );
-      throw new HttpException(
-        'Failed to communicate with Trinks API',
-        HttpStatus.BAD_GATEWAY,
-      );
+      this.logger.error('Failed to communicate with Trinks API while cancelling an appointment', error as Error);
+      throw new HttpException('Failed to communicate with Trinks API', HttpStatus.BAD_GATEWAY);
     }
 
     // Expecting 204 No Content on success
@@ -487,59 +234,31 @@ export class AgendamentosService {
     try {
       parsed = responseText ? JSON.parse(responseText) : {};
     } catch (error) {
-      this.logger.error(
-        'Invalid JSON received from Trinks API while cancelling an appointment',
-        error as Error,
-      );
-      throw new HttpException(
-        'Invalid response from Trinks API',
-        HttpStatus.BAD_GATEWAY,
-      );
+      this.logger.error('Invalid JSON received from Trinks API while cancelling an appointment', error as Error);
+      throw new HttpException('Invalid response from Trinks API', HttpStatus.BAD_GATEWAY);
     }
 
     switch (response.status) {
       case HttpStatus.UNAUTHORIZED:
       case HttpStatus.FORBIDDEN:
-        throw new HttpException(
-          'Trinks API authentication or authorization failed',
-          HttpStatus.BAD_GATEWAY,
-        );
+        throw new HttpException('Trinks API authentication or authorization failed', HttpStatus.BAD_GATEWAY);
       case HttpStatus.BAD_REQUEST:
       case 422:
-        throw new HttpException(
-          parsed || 'Bad request to Trinks API',
-          HttpStatus.BAD_REQUEST,
-        );
+        throw new HttpException(parsed || 'Bad request to Trinks API', HttpStatus.BAD_REQUEST);
       case HttpStatus.NOT_FOUND:
-        throw new HttpException(
-          'Trinks resource not found',
-          HttpStatus.NOT_FOUND,
-        );
+        throw new HttpException('Trinks resource not found', HttpStatus.NOT_FOUND);
       case HttpStatus.TOO_MANY_REQUESTS:
-        this.logger.warn(
-          'Trinks rate limit reached (HTTP 429). No retry will be performed.',
-        );
-        throw new HttpException(
-          'Trinks rate limit reached',
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
+        this.logger.warn('Trinks rate limit reached (HTTP 429). No retry will be performed.');
+        throw new HttpException('Trinks rate limit reached', HttpStatus.TOO_MANY_REQUESTS);
       default:
-        this.logger.error(
-          `Trinks API returned unexpected status ${response.status}`,
-          parsed as Error,
-        );
-        throw new HttpException(
-          'Trinks API returned an unexpected error',
-          HttpStatus.BAD_GATEWAY,
-        );
+        this.logger.error(`Trinks API returned unexpected status ${response.status}`, parsed as Error);
+        throw new HttpException('Trinks API returned an unexpected error', HttpStatus.BAD_GATEWAY);
     }
   }
 
-  async prepareCreateAgendamentoRequest(
+  prepareCreateAgendamentoRequest(
     payload: TrinksCreateAgendamentoPayload,
-  ): Promise<TrinksCreateAgendamentoRequest> {
-    await this.validateLocalAgendamentoRules(payload);
-
+  ): TrinksCreateAgendamentoRequest {
     const { apiKey, baseUrl, estabelecimentoId } =
       this.trinksService.getApiConfig();
     const url = this.trinksService.buildApiUrl('/agendamentos', baseUrl);
@@ -573,12 +292,6 @@ export class AgendamentosService {
   async createAgendamento(
     request: TrinksCreateAgendamentoRequest,
   ): Promise<unknown> {
-    this.logger.log(
-      `Enviando agendamento para a Trinks: cliente ${request.body.clienteId}, serviço ${request.body.servicoId}.`,
-    );
-
-    await this.validateLocalAgendamentoRules(request.body);
-
     let response: Response;
 
     try {

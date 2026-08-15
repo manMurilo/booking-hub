@@ -1,12 +1,4 @@
-﻿import {
-  BadRequestException,
-  Controller,
-  Get,
-  Query,
-  Param,
-  Post,
-  Body,
-} from '@nestjs/common';
+﻿import { BadRequestException, Controller, Get, Query, Param, Post, Body } from '@nestjs/common';
 import { ClientesService } from './clientes.service';
 import {
   TrinksClientesResponse,
@@ -53,19 +45,19 @@ export class ClientesController {
     });
   }
 
-  @Get('clientes/:id')
-  async getClientePorId(@Param('id') id?: string): Promise<TrinksCliente> {
-    const idValue = id ? Number(id) : undefined;
+    @Get('clientes/:id')
+    async getClientePorId(@Param('id') id?: string): Promise<TrinksCliente> {
+      const idValue = id ? Number(id) : undefined;
 
-    if (idValue === undefined || Number.isNaN(idValue)) {
-      throw new BadRequestException('id é obrigatório e deve ser number.');
+      if (idValue === undefined || Number.isNaN(idValue)) {
+        throw new BadRequestException('id é obrigatório e deve ser number.');
+      }
+
+      return this.clientesService.getClientePorId(idValue);
     }
 
-    return this.clientesService.getClientePorId(idValue);
-  }
-
-  @Post('clientes')
-  async createCliente(@Body() payload: AddCliente): Promise<CreatedIdModel> {
-    return this.clientesService.createCliente(payload);
-  }
+    @Post('clientes')
+    async createCliente(@Body() payload: AddCliente): Promise<CreatedIdModel> {
+      return this.clientesService.createCliente(payload);
+    }
 }
