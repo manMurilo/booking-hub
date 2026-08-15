@@ -127,19 +127,20 @@ export class WhatsAppService implements OnModuleInit {
     const outgoingMessage = this.messageAdapterService.prepareOutgoingMessage(to, text);
     const result = await this.baileysConnectionService.sendMessage(outgoingMessage);
 
-    if (result.status === 'sent') {
-      this.logger.log(
-        `✅ WHATSAPP — ENVIO CONFIRMADO\n` +
-        `   Para: ${to}\n` +
-        `   Message ID: ${result.messageId}`,
-      );
-    } else {
+    if (result.status === 'failed') {
       this.logger.error(
         `❌ WHATSAPP — ERRO NO ENVIO\n` +
         `   Para: ${to}\n` +
         `   Erro: ${result.error}`,
       );
+      return;
     }
+
+    this.logger.log(
+      `📤 WHATSAPP — ENVIO SOLICITADO\n` +
+      `   Para: ${to}\n` +
+      `   Message ID: ${result.messageId || '(sem id recebido)'}`,
+    );
   }
 
   /**

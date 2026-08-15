@@ -16,6 +16,7 @@ import {
   ProcessMessageResult,
 } from './whatsapp.types';
 import { HttpExceptionFilter } from '../../common/filters/http-exception.filter';
+import { BaileysConnectionService } from '../../integrations/whatsapp/baileys-connection.service';
 
 /**
  * WhatsApp Controller - Handles webhook and API endpoints
@@ -26,7 +27,10 @@ import { HttpExceptionFilter } from '../../common/filters/http-exception.filter'
 export class WhatsAppController {
   private readonly logger = new Logger(WhatsAppController.name);
 
-  constructor(private whatsAppService: WhatsAppService) {}
+  constructor(
+    private whatsAppService: WhatsAppService,
+    private baileysConnectionService: BaileysConnectionService,
+  ) {}
 
   /**
    * Webhook endpoint for WhatsApp messages
@@ -149,18 +153,24 @@ export class WhatsAppController {
   @Post('test-message')
   async testMessage(
     @Body() body: { phone: string; text: string },
-  ): Promise<ProcessMessageResult> {
+  ): Promise<{ status: string; messageId: string; timestamp: Date; error?: string }> {
     if (!body.phone || !body.text) {
       throw new BadRequestException('Missing phone or text');
     }
 
-    const message: WhatsAppMessage = {
-      from: body.phone,
-      text: body.text,
-      timestamp: Date.now(),
-    };
+    const normalizedPhone = body.phone.replace(/\D/g, '');
+    if (!normalizedPhone || normalizedPhone.length < 10) {
+      throw new BadRequestException('Phone must be a valid WhatsApp contact number');
+    }
 
-    return this.whatsAppService.processMessage(message);
+    if (normalizedPhone.length >= 12 && normalizedPhone.includes('@g.us')) {
+      throw new BadRequestException('Group JID is not allowed for the isolated test message');
+    }
+
+    return this.baileysConnectionService.sendMessage({
+      to: normalizedPhone,
+      text: body.text,
+    });
   }
 
   /**

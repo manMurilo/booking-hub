@@ -12,6 +12,7 @@ export enum WhatsAppConnectionState {
   QR_REQUIRED = 'qr_required',
   CONNECTED = 'connected',
   RECONNECTING = 'reconnecting',
+  LOGGED_OUT = 'logged_out',
 }
 
 /**
@@ -45,6 +46,10 @@ export interface WhatsAppIncomingMessage {
 export interface WhatsAppOutgoingMessage {
   to: string; // Número destino (ex: "5511987654321")
   text: string; // Conteúdo da mensagem
+  quoted?: {
+    jid?: string;
+    messageId?: string;
+  };
 }
 
 /**
@@ -69,10 +74,17 @@ export interface IWhatsAppConnection {
   // Conexão
   connect(): Promise<void>;
   disconnect(): Promise<void>;
+  logout(): Promise<void>;
 
   // Mensagens
   onMessage(callback: (message: WhatsAppIncomingMessage) => Promise<void>): void;
   sendMessage(message: WhatsAppOutgoingMessage): Promise<WhatsAppSendResult>;
+  sendReply(
+    message: WhatsAppOutgoingMessage,
+    quoted?: { jid?: string; messageId?: string },
+  ): Promise<WhatsAppSendResult>;
+  markAsRead(jid: string, messageId: string): Promise<void>;
+  sendPresence(type: 'composing' | 'paused' | 'available' | 'unavailable', jid?: string): Promise<void>;
 
   // Eventos
   onConnectionStateChange(callback: (event: WhatsAppConnectionEvent) => void): void;

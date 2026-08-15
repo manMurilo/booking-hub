@@ -8,6 +8,9 @@ import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
   WASocket,
+  WAMessage,
+  WAMessageKey,
+  WAPresence,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import {
@@ -19,19 +22,6 @@ import {
   WhatsAppSendResult,
 } from './whatsapp-integration.types';
 
-/**
- * BaileysConnectionService
- * Gerencia a conexão real com WhatsApp através do Baileys
- *
- * Esta camada é responsável por:
- * - Autenticação e persistência de sessão
- * - Envio e recebimento de mensagens
- * - Gerenciamento de estados de conexão
- * - Reconexão automática
- *
- * NÃO deve ser utilizada diretamente pela lógica de negócio.
- * Use o WhatsAppService para processar mensagens.
- */
 @Injectable()
 export class BaileysConnectionService implements IWhatsAppConnection, OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BaileysConnectionService.name);
@@ -42,14 +32,12 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private readonly authDir = path.join(process.cwd(), '.whatsapp-auth');
   private isShuttingDown = false;
+  private readonly messageCache = new Map<string, WAMessage>();
 
   constructor(private configService: ConfigService) {
     this.ensureAuthDirExists();
   }
 
-  /**
-   * Inicializar conexão ao carregar o módulo
-   */
   async onModuleInit() {
     try {
       this.logger.log('[WhatsApp] Inicializando integração Baileys...');
@@ -60,17 +48,11 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     }
   }
 
-  /**
-   * Desconectar ao destruir o módulo
-   */
   async onModuleDestroy() {
     this.isShuttingDown = true;
     await this.close();
   }
 
-  /**
-   * Garante que o diretório de autenticação existe
-   */
   private ensureAuthDirExists(): void {
     if (!fs.existsSync(this.authDir)) {
       fs.mkdirSync(this.authDir, { recursive: true });
@@ -78,9 +60,6 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     }
   }
 
-  /**
-   * Conectar ao WhatsApp
-   */
   async connect(): Promise<void> {
     if (this.sock) {
       this.logger.warn('[WhatsApp] Já conectado ou conectando...');
@@ -90,13 +69,11 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     this.updateConnectionState(WhatsAppConnectionState.CONNECTING, 'Conectando ao WhatsApp...');
 
     try {
-      // Carregar estado de autenticação persistido
       const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
 
-      // Criar socket
       this.sock = makeWASocket({
         auth: state,
-        printQRInTerminal: false, // Vamos exibir QR manualmente
+        printQRInTerminal: false,
         logger: this.createBaileysLogger(),
         browser: ['Booking Hub', 'Chrome', '120.0'],
         syncFullHistory: false,
@@ -104,32 +81,24 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
         generateHighQualityLinkPreview: false,
       });
 
-      // Configurar handlers de autenticação
       this.sock.ev.on('creds.update', saveCreds);
+      this.sock.ev.on('connection.update', (update) => this.handleConnectionUpdate(update));
+      this.sock.ev.on('messages.upsert', (event) => this.handleMessagesUpsert(event));
+      this.sock.ev.on('messages.update', (updates) => this.handleMessagesUpdate(updates));
+      this.sock.ev.on('message-receipt.update', (updates) => this.handleMessageReceiptUpdate(updates));
 
-      // Handler de mudança de conexão
-      this.sock.ev.on('connection.update', (update) => {
-        this.handleConnectionUpdate(update);
-      });
-
-      // Handler de mensagens
-      this.sock.ev.on('messages.upsert', (m) => {
-        this.handleMessagesUpsert(m);
-      });
-
-      // Aguardar autenticação
       await new Promise<void>((resolve) => {
         const checkConnection = () => {
           if (this.sock?.user) {
             resolve();
-          } else {
-            setTimeout(checkConnection, 100);
+            return;
           }
+          setTimeout(checkConnection, 100);
         };
         checkConnection();
       });
 
-      this.logger.log(`[WhatsApp] Conectado como ${this.sock.user?.name || this.sock.user?.id}`);
+      this.logger.log(`[WhatsApp] Conectado como ${this.sock?.user?.name || this.sock?.user?.id || 'usuário'}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`[WhatsApp] Erro na conexão: ${message}`);
@@ -138,122 +107,113 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     }
   }
 
-  /**
-   * Handler para mudanças de conexão
-   */
   private handleConnectionUpdate(update: Partial<ConnectionState>) {
     const { connection, lastDisconnect, qr } = update;
 
-    // Novo QR Code
     if (qr) {
       this.logger.warn('[WhatsApp] QR Code disponível - escaneie com o WhatsApp');
       this.updateConnectionState(WhatsAppConnectionState.QR_REQUIRED, 'Escaneie o QR Code com o WhatsApp');
       this.displayQRCode(qr);
     }
 
-    // Mudança de conexão
-    if (connection === 'close') {
-      // Desconectado
-      const shouldReconnect =
-        (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+    if (connection === 'connecting') {
+      this.updateConnectionState(WhatsAppConnectionState.CONNECTING, 'Conectando ao WhatsApp...');
+      return;
+    }
 
-      if (shouldReconnect && !this.isShuttingDown) {
+    if (connection === 'close') {
+      const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+      const wasLoggedOut = statusCode === DisconnectReason.loggedOut;
+
+      if (!wasLoggedOut && !this.isShuttingDown) {
         this.logger.warn('[WhatsApp] Conexão perdida, tentando reconectar...');
         this.updateConnectionState(WhatsAppConnectionState.RECONNECTING, 'Reconectando...');
         this.sock = null;
 
-        // Reconectar com delay
         if (this.reconnectTimeout) {
           clearTimeout(this.reconnectTimeout);
         }
+
         this.reconnectTimeout = setTimeout(() => {
           this.connect().catch((err) => {
             const message = err instanceof Error ? err.message : 'Unknown error';
             this.logger.error(`[WhatsApp] Erro na reconexão: ${message}`);
           });
         }, 3000);
-      } else {
-        this.logger.log('[WhatsApp] Desconectado (logout ou encerramento)');
-        this.updateConnectionState(WhatsAppConnectionState.DISCONNECTED, 'Desconectado');
-        this.sock = null;
+        return;
       }
-    } else if (connection === 'open') {
-      // Conectado
+
+      this.logger.log('[Baileys] Sessão encerrada');
+      this.updateConnectionState(
+        wasLoggedOut ? WhatsAppConnectionState.LOGGED_OUT : WhatsAppConnectionState.DISCONNECTED,
+        wasLoggedOut ? 'Logout definitivo' : 'Desconectado',
+      );
+      this.sock = null;
+      return;
+    }
+
+    if (connection === 'open') {
       this.logger.log('[WhatsApp] Conectado com sucesso');
       this.updateConnectionState(WhatsAppConnectionState.CONNECTED, 'Conectado');
     }
   }
 
-  /**
-   * Handler para mensagens recebidas
-   */
-  private async handleMessagesUpsert(m: {
-    messages: any[];
-    type: string;
-  }) {
-    if (m.type !== 'notify') {
+  private async handleMessagesUpsert(event: { messages: WAMessage[]; type: string }) {
+    if (event.type !== 'notify') {
       return;
     }
 
-    for (const message of m.messages) {
+    for (const message of event.messages) {
       try {
-        // Ignorar mensagens do próprio bot
+        if (!message?.key) {
+          continue;
+        }
+
         if (message.key.fromMe) {
           continue;
         }
 
-        // Ignorar mensagens de grupo
-        if (message.key.remoteJid?.includes('@g.us')) {
-          this.logger.debug('[WhatsApp] Ignorando mensagem de grupo');
+        const remoteJid = message.key.remoteJid;
+        if (!remoteJid || remoteJid.includes('@g.us') || remoteJid === 'status@broadcast') {
+          this.logger.debug('[WhatsApp] Ignorando mensagem fora do escopo do MVP');
           continue;
         }
 
-        // Ignorar mensagens sem conteúdo de texto
-        if (!message.message?.conversation && !message.message?.extendedTextMessage?.text) {
+        const text = message.message?.conversation || message.message?.extendedTextMessage?.text;
+        if (!text) {
           this.logger.debug('[WhatsApp] Ignorando mensagem sem texto');
           continue;
         }
 
-        // Extrair texto
-        const text =
-          message.message?.conversation || message.message?.extendedTextMessage?.text;
+        const jid = this.normalizeJid(remoteJid);
+        const sender = this.toPhoneNumber(jid);
 
-        if (!text) {
-          continue;
-        }
-
-        // Normalizar JID para número
-        const jid = message.key.remoteJid;
-        const sender = jid.split('@')[0];
-
-        // Criar mensagem normalizada
         const incomingMessage: WhatsAppIncomingMessage = {
           jid,
           sender,
           text,
-          timestamp: message.messageTimestamp || Math.floor(Date.now() / 1000),
-          messageId: message.key.id,
-          isFromBot: message.key.fromMe,
-          isGroupMessage: jid.includes('@g.us'),
+          timestamp: Number(message.messageTimestamp || Math.floor(Date.now() / 1000)),
+          messageId: message.key.id || '',
+          isFromBot: false,
+          isGroupMessage: false,
         };
 
-        // Log estruturado de mensagem recebida
+        this.messageCache.set(`${jid}:${incomingMessage.messageId}`, message);
+
         this.logger.log(
           `📥 WHATSAPP — MENSAGEM RECEBIDA\n` +
-          `   De: ${sender}\n` +
-          `   Tipo: text\n` +
-          `   Message ID: ${message.key.id}\n` +
-          `   Mensagem: "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"\n` +
-          `   Horário: ${new Date(message.messageTimestamp * 1000).toISOString()}`,
+            `   De: ${sender}\n` +
+            `   Tipo: text\n` +
+            `   Message ID: ${incomingMessage.messageId || '(sem id)'}\n` +
+            `   Mensagem: "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"`,
         );
 
-        // Chamar handlers registrados
         for (const handler of this.messageHandlers) {
           try {
             await handler(incomingMessage);
           } catch (error) {
             const errMessage = error instanceof Error ? error.message : 'Unknown error';
-            this.logger.error(`[WhatsApp] Erro ao processar mensagem: ${errMessage}`);
+            this.logger.error(`[WhatsApp] Erro ao processar mensagem recebida: ${errMessage}`);
           }
         }
       } catch (error) {
@@ -263,23 +223,54 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     }
   }
 
-  /**
-   * Registrar handler para recebimento de mensagens
-   */
+  private handleMessagesUpdate(updates: Array<{ key: WAMessageKey; update: Partial<WAMessage> }>) {
+    for (const update of updates) {
+      const { key, update: messageUpdate } = update;
+      const status = messageUpdate.status;
+
+      if (status == null) {
+        continue;
+      }
+
+      const statusLabel = this.mapStatusToLabel(Number(status));
+      if (!statusLabel) {
+        continue;
+      }
+
+      this.logger.log(
+        `📡 ACK\n` +
+          `   Message ID: ${key.id || '(sem id)'}\n` +
+          `   Status: ${statusLabel}`,
+      );
+    }
+  }
+
+  private handleMessageReceiptUpdate(
+    updates: Array<{ key: WAMessageKey; receipt: { readTimestamp?: number | null | unknown; receiptTimestamp?: number | null | unknown } }>,
+  ) {
+    for (const update of updates) {
+      const messageId = update.key.id || '(sem id)';
+      const deliveryTimestamp = update.receipt?.receiptTimestamp;
+      const readTimestamp = update.receipt?.readTimestamp;
+
+      if (deliveryTimestamp != null && Number(deliveryTimestamp) > 0) {
+        this.logger.log(`📬 ENTREGA\n   Message ID: ${messageId}`);
+      }
+
+      if (readTimestamp != null && Number(readTimestamp) > 0) {
+        this.logger.log(`👁 LEITURA\n   Message ID: ${messageId}`);
+      }
+    }
+  }
+
   onMessage(callback: (message: WhatsAppIncomingMessage) => Promise<void>): void {
     this.messageHandlers.push(callback);
   }
 
-  /**
-   * Registrar handler para mudanças de conexão
-   */
   onConnectionStateChange(callback: (event: WhatsAppConnectionEvent) => void): void {
     this.connectionStateHandlers.push(callback);
   }
 
-  /**
-   * Enviar mensagem
-   */
   async sendMessage(message: WhatsAppOutgoingMessage): Promise<WhatsAppSendResult> {
     if (!this.sock || !this.isConnected()) {
       return {
@@ -291,40 +282,32 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     }
 
     try {
-      const jid = `${message.to}@s.whatsapp.net`;
-      
-      this.logger.log(
-        `📤 WHATSAPP — ENVIANDO MENSAGEM\n` +
-        `   Para: ${jid}\n` +
-        `   Mensagem: "${message.text.substring(0, 100)}${message.text.length > 100 ? '...' : ''}"`,
-      );
+      const destinationJid = this.normalizeJid(message.to);
+      if (destinationJid.includes('@g.us')) {
+        throw new Error('Grupos não são permitidos no teste isolado de envio');
+      }
 
-      const result = await this.sock.sendMessage(jid, {
-        text: message.text,
-      });
-
-      // Log do retorno do sendMessage
+      const sendOptions = this.buildSendOptions(message);
+      const result = await this.sock.sendMessage(destinationJid, { text: message.text }, sendOptions);
       const messageId = result?.key?.id || '';
-      const status = result?.key ? 'queued' : 'unknown';
-      
+
       this.logger.log(
-        `📨 WHATSAPP — SEND RESULT\n` +
-        `   Para: ${message.to}\n` +
-        `   Message ID: ${messageId}\n` +
-        `   Status: ${status}`,
+        `📤 ENVIO SOLICITADO\n` +
+          `   Para: ${destinationJid}\n` +
+          `   Message ID: ${messageId || '(sem id recebido)'}`,
       );
 
       return {
         messageId,
         timestamp: new Date(),
-        status: 'sent',
+        status: 'pending',
       };
     } catch (error) {
       const errMessage = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(
         `❌ WHATSAPP — ERRO AO ENVIAR\n` +
-        `   Para: ${message.to}\n` +
-        `   Erro: ${errMessage}`,
+          `   Para: ${message.to}\n` +
+          `   Erro: ${errMessage}`,
       );
       return {
         messageId: '',
@@ -335,24 +318,92 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     }
   }
 
-  /**
-   * Obter estado de conexão
-   */
+  async sendReply(
+    message: WhatsAppOutgoingMessage,
+    quoted?: { jid?: string; messageId?: string },
+  ): Promise<WhatsAppSendResult> {
+    if (!quoted?.jid || !quoted?.messageId) {
+      return this.sendMessage(message);
+    }
+
+    const quotedMessage = this.messageCache.get(`${this.normalizeJid(quoted.jid)}:${quoted.messageId}`);
+    const payload = {
+      ...message,
+      quoted: quotedMessage ? { jid: quoted.jid, messageId: quoted.messageId } : undefined,
+    };
+
+    return this.sendMessage(payload);
+  }
+
+  async markAsRead(jid: string, messageId: string): Promise<void> {
+    if (!this.sock || !this.isConnected()) {
+      return;
+    }
+
+    try {
+      const targetJid = this.normalizeJid(jid);
+      const key: WAMessageKey = {
+        remoteJid: targetJid,
+        id: messageId,
+        fromMe: false,
+      };
+
+      await this.sock.readMessages([key]);
+      this.logger.log(`👁 WHATSAPP — MARCADA COMO LIDA\n   Para: ${targetJid}\n   Message ID: ${messageId}`);
+    } catch (error) {
+      const errMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(
+        `❌ WHATSAPP — ERRO AO MARCAR COMO LIDA\n` +
+          `   Para: ${jid}\n` +
+          `   Message ID: ${messageId}\n` +
+          `   Erro: ${errMessage}`,
+      );
+    }
+  }
+
+  async sendPresence(type: 'composing' | 'paused' | 'available' | 'unavailable', jid?: string): Promise<void> {
+    if (!this.sock || !this.isConnected()) {
+      return;
+    }
+
+    try {
+      const presenceType = type as WAPresence;
+      const target = jid ? this.normalizeJid(jid) : undefined;
+      await this.sock.sendPresenceUpdate(presenceType, target);
+      this.logger.debug(
+        `[WhatsApp] Presence enviada: ${type}${target ? ` para ${target}` : ''}`,
+      );
+    } catch (error) {
+      const errMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`[WhatsApp] Erro ao enviar presença: ${errMessage}`);
+    }
+  }
+
   getConnectionState(): WhatsAppConnectionState {
     return this.connectionState;
   }
 
-  /**
-   * Verificar se está conectado
-   */
   isConnected(): boolean {
     return this.connectionState === WhatsAppConnectionState.CONNECTED && !!this.sock?.user;
   }
 
-  /**
-   * Desconectar
-   */
   async disconnect(): Promise<void> {
+    if (!this.sock) {
+      return;
+    }
+
+    try {
+      this.sock.end(new Error('Temporary disconnect'));
+      this.sock = null;
+      this.updateConnectionState(WhatsAppConnectionState.DISCONNECTED, 'Desconectado temporariamente');
+      this.logger.log('[WhatsApp] Conexão temporária encerrada');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`[WhatsApp] Erro ao desconectar temporariamente: ${message}`);
+    }
+  }
+
+  async logout(): Promise<void> {
     if (!this.sock) {
       return;
     }
@@ -360,27 +411,25 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     try {
       await this.sock.logout();
       this.sock = null;
-      this.updateConnectionState(WhatsAppConnectionState.DISCONNECTED, 'Desconectado manualmente');
-      this.logger.log('[WhatsApp] Desconectado');
+      this.updateConnectionState(WhatsAppConnectionState.LOGGED_OUT, 'Logout definitivo');
+      this.logger.log('[WhatsApp] Logout efetuado');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`[WhatsApp] Erro ao desconectar: ${message}`);
+      this.logger.error(`[WhatsApp] Erro ao realizar logout: ${message}`);
     }
   }
 
-  /**
-   * Fechar conexão (limpeza)
-   */
   async close(): Promise<void> {
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
     }
 
     if (this.sock) {
       try {
         this.sock.end(new Error('Module destruction'));
-      } catch (error) {
-        // Ignorar erros ao fechar
+      } catch {
+        // noop
       }
     }
 
@@ -388,9 +437,6 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     this.updateConnectionState(WhatsAppConnectionState.DISCONNECTED, 'Encerrado');
   }
 
-  /**
-   * Atualizar estado de conexão e notificar handlers
-   */
   private updateConnectionState(state: WhatsAppConnectionState, message: string): void {
     this.connectionState = state;
     const event: WhatsAppConnectionEvent = {
@@ -409,9 +455,61 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
     }
   }
 
-  /**
-   * Exibir QR Code no terminal
-   */
+  private normalizeJid(value: string): string {
+    if (!value) {
+      throw new Error('JID vazio');
+    }
+
+    if (value.includes('@')) {
+      return value;
+    }
+
+    const digits = value.replace(/\D/g, '');
+    if (!digits) {
+      throw new Error('JID inválido');
+    }
+
+    const withCountry = digits.startsWith('55') ? digits : `55${digits}`;
+    return `${withCountry}@s.whatsapp.net`;
+  }
+
+  private toPhoneNumber(jid: string): string {
+    if (!jid) {
+      return '';
+    }
+
+    return jid.split('@')[0].replace(/\D/g, '');
+  }
+
+  private buildSendOptions(message: WhatsAppOutgoingMessage): Record<string, unknown> | undefined {
+    if (!message.quoted?.jid || !message.quoted?.messageId) {
+      return undefined;
+    }
+
+    const quotedMessageKey = `${this.normalizeJid(message.quoted.jid)}:${message.quoted.messageId}`;
+    const quotedMessage = this.messageCache.get(quotedMessageKey);
+    if (!quotedMessage) {
+      return undefined;
+    }
+
+    return {
+      quoted: quotedMessage,
+    };
+  }
+
+  private mapStatusToLabel(status: number): string | undefined {
+    switch (status) {
+      case 2:
+        return 'SERVER_ACK';
+      case 3:
+        return 'DELIVERED';
+      case 4:
+        return 'READ';
+      default:
+        return undefined;
+    }
+  }
+
   private displayQRCode(qr: string): void {
     try {
       console.log('\n');
@@ -422,24 +520,20 @@ export class BaileysConnectionService implements IWhatsAppConnection, OnModuleIn
       console.log('\n');
       qrcode.generate(qr, { small: true });
       console.log('\n');
-    } catch (error) {
+    } catch {
       this.logger.warn('Erro ao exibir QR Code no terminal');
     }
   }
 
-  /**
-   * Criar logger personalizado para Baileys
-   * Silencia logs desnecessários e remove dados sensíveis
-   */
   private createBaileysLogger() {
     return {
       level: 'silent' as any,
-      log: () => {},
-      error: () => {}, // Silenciar erros internos do Baileys (são redundantes)
-      warn: () => {}, // Silenciar warnings do Baileys
-      info: () => {}, // Silenciar info do Baileys
-      debug: () => {}, // Silenciar debug do Baileys
-      trace: () => {},
+      log: () => undefined,
+      error: () => undefined,
+      warn: () => undefined,
+      info: () => undefined,
+      debug: () => undefined,
+      trace: () => undefined,
       child: () => this.createBaileysLogger(),
     };
   }
