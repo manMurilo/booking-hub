@@ -1,6 +1,6 @@
 # Booking Hub
 
-Backend em NestJS que centraliza a integração do produto com a API da Trinks e já possui uma camada inicial para consultas de booking, estado conversacional e processamento de mensagens via WhatsApp com Grok.
+Backend em NestJS que centraliza a integração do produto com a API da Trinks e possui uma camada inicial para consultas de booking, estado conversacional e processamento de mensagens via WhatsApp com Grok.
 
 > **Estado em 14/08/2026:** o projeto está em fase de fundação/MVP. A integração Trinks está avançada; os módulos de Booking, estado conversacional, IA e WhatsApp existem, mas o fluxo conversacional ainda é prototípico e não executa o ciclo completo de agendamento.
 
@@ -34,7 +34,6 @@ WhatsApp
 - `@nestjs/config`
 - Swagger / OpenAPI
 - `class-validator` + `class-transformer`
-- Jest está disponível no projeto e há testes automatizados existentes
 - Grok via API compatível com OpenAI (integração presente, ainda não é requisito do núcleo Trinks)
 
 ## Arquitetura atual
@@ -74,9 +73,8 @@ Configuração principal:
 ```env
 TRINKS_API_KEY=...
 TRINKS_BASE_URL=...
-TRINKS_ESTABELECIMENTO_ID=
+TRINKS_ESTABELECIMENTO_ID=...
 ```
-
 
 A API Key nunca deve ser versionada.
 
@@ -226,12 +224,6 @@ Build:
 npm run build
 ```
 
-Testes:
-
-```bash
-npm test
-```
-
 ## Variáveis de ambiente
 
 ```env
@@ -240,7 +232,7 @@ NODE_ENV=development
 
 TRINKS_BASE_URL=...
 TRINKS_API_KEY=...
-TRINKS_ESTABELECIMENTO_ID=
+TRINKS_ESTABELECIMENTO_ID=...
 
 GROK_API_KEY=...
 GROK_MODEL=grok-2-1212
@@ -262,4 +254,3 @@ A prioridade continua sendo:
 
 Para o contexto detalhado, consulte [`docs/contexto-geral-da-aplicacao.md`](docs/contexto-geral-da-aplicacao.md).
 Para detalhes da integração de agendamentos, consulte [`docs/trinks-agendamentos.md`](docs/trinks-agendamentos.md).
-Para a referência consolidada das rotas, consulte [`API_DOCUMENTATION.md`](API_DOCUMENTATION.md).
