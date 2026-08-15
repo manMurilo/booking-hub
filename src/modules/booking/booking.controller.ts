@@ -18,9 +18,29 @@ import {
  * - Listagem de planos, serviços, profissionais
  * - Validação de agendamentos
  */
-@Controller('api/booking')
+@Controller('booking')
 export class BookingController {
   constructor(private readonly bookingService: BookingService) {}
+
+  /**
+   * POST /booking/agendamento
+   * Cria um agendamento validando cliente, serviço, profissional e disponibilidade
+   */
+  @Post('agendamento')
+  @HttpCode(200)
+  async createAppointment(
+    @Body()
+    payload: {
+      clienteId: number;
+      servicoId: number;
+      profissionalId: number;
+      dataHora: string;
+      valor?: number;
+      observacoes?: string;
+    },
+  ): Promise<any> {
+    return this.bookingService.createAppointment(payload);
+  }
 
   /**
    * GET /api/booking/cliente/by-phone

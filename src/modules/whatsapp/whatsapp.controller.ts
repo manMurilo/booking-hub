@@ -4,6 +4,7 @@ import {
   Get,
   Body,
   Query,
+  Param,
   Logger,
   BadRequestException,
   UseFilters,
@@ -20,7 +21,7 @@ import { HttpExceptionFilter } from '../../common/filters/http-exception.filter'
  * WhatsApp Controller - Handles webhook and API endpoints
  * Receives WhatsApp messages and processes them
  */
-@Controller('api/whatsapp')
+@Controller('whatsapp')
 @UseFilters(HttpExceptionFilter)
 export class WhatsAppController {
   private readonly logger = new Logger(WhatsAppController.name);
@@ -167,7 +168,7 @@ export class WhatsAppController {
    * GET /api/whatsapp/conversation/:conversationId
    */
   @Get('conversation/:conversationId')
-  getConversation(@Body('conversationId') conversationId: string): any {
+  getConversation(@Param('conversationId') conversationId: string): any {
     if (!conversationId) {
       throw new BadRequestException('Missing conversationId');
     }

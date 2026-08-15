@@ -214,19 +214,38 @@ export class BookingService {
         throw new NotFoundException('Serviço não encontrado');
       }
 
-      const availabilityDay = await this.getAvailabilityForDay(
-        profissionalId,
-        dataInicio,
-      );
+      const start = new Date(`${dataInicio}T00:00:00`);
+      const end = dataFim ? new Date(`${dataFim}T00:00:00`) : start;
+
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        throw new BadRequestException('Datas de disponibilidade inválidas');
+      }
+
+      if (start > end) {
+        throw new BadRequestException('dataInicio não pode ser maior que dataFim');
+      }
+
+      const dias: AvailabilityResponse[] = [];
+      const cursor = new Date(start);
+
+      while (cursor <= end) {
+        const dateKey = this.toDateKey(cursor);
+        dias.push(await this.getAvailabilityForDay(profissionalId, dateKey));
+        cursor.setDate(cursor.getDate() + 1);
+      }
 
       return {
         profissionalId,
         profissionalNome: profissional.nome,
         servicoId,
         servicoNome: servico.nome,
-        dias: [availabilityDay],
+        dias,
       };
     } catch (error) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+
       const message = error instanceof Error ? error.message : 'Erro desconhecido';
       this.logger.error(`Erro ao buscar agenda múltiplos dias: ${message}`);
       throw new BadRequestException('Erro ao buscar disponibilidade');
@@ -344,19 +363,7 @@ export class BookingService {
     profissionalId: number,
     dataHora: string,
   ): Promise<ValidateAppointmentResult> {
-    const conflitos: string[] = [];
-
     try {
-      // Valida cliente
-      const cliente = await this.clientesService.getClientePorId(clienteId);
-      if (!cliente) {
-        return {
-          valid: false,
-          reason: 'Cliente não encontrado',
-        };
-      }
-
-      // Valida serviço
       const servicos = await this.servicosService.getServicos({});
       const servico = servicos?.data?.find((s: any) => s.id === servicoId);
       if (!servico) {
@@ -366,7 +373,14 @@ export class BookingService {
         };
       }
 
-      // Valida profissional
+      const cliente = await this.clientesService.getClientePorId(clienteId);
+      if (!cliente) {
+        return {
+          valid: false,
+          reason: 'Cliente não encontrado',
+        };
+      }
+
       const profissionais = await this.profissionaisService.getProfissionais({});
       const profissional = profissionais?.data?.find((p: any) => p.id === profissionalId);
       if (!profissional) {
@@ -376,43 +390,21 @@ export class BookingService {
         };
       }
 
-      // Extrai data do dataHora (formato: YYYY-MM-DD HH:mm)
-      const [data] = dataHora.split(' ');
-
-      // Verifica disponibilidade de horário
-      const availability = await this.getAvailabilityForDay(profissionalId, data);
-      const [, horario] = dataHora.split(' ');
-      const slotDisponivel = availability.slots.find((s) => s.horario === horario);
-
-      if (!slotDisponivel || !slotDisponivel.disponivel) {
-        conflitos.push('Horário não está disponível');
-      }
-
-      // Verifica se cliente tem agendamento futuro (não pode fazer novo sem cancelar)
-      const agendamentosFuturos = await this.agendamentosService.getAgendamentos({
+      const duracaoEmMinutos = Number(servico.duracaoEmMinutos ?? servico.duracao ?? 0);
+      const valor = Number(servico.preco ?? 0);
+      const requestPayload = {
+        servicoId,
         clienteId,
-      });
-      if (agendamentosFuturos?.data && agendamentosFuturos.data.length > 0) {
-        const proximoAgendamento = agendamentosFuturos.data[0] as any;
-        conflitos.push(
-          `Cliente já tem agendamento em ${proximoAgendamento.dataHora}`,
-        );
-      }
+        profissionalId,
+        dataHoraInicio: dataHora,
+        duracaoEmMinutos,
+        valor,
+        observacoes: null,
+        confirmado: false,
+      };
 
-      // Se tem conflitos, retorna inválido
-      if (conflitos.length > 0) {
-        return {
-          valid: false,
-          reason: conflitos[0],
-          clienteId,
-          servicoId,
-          profissionalId,
-          dataHora,
-          conflitos,
-        };
-      }
+      await this.agendamentosService.validateLocalAgendamentoRules(requestPayload);
 
-      // Tudo validado, retorna sucesso
       return {
         valid: true,
         clienteId,
@@ -421,10 +413,79 @@ export class BookingService {
         dataHora,
       };
     } catch (error) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        return {
+          valid: false,
+          reason: error.message,
+          clienteId,
+          servicoId,
+          profissionalId,
+          dataHora,
+          conflitos: [error.message],
+        };
+      }
+
       const message = error instanceof Error ? error.message : 'Erro desconhecido';
       this.logger.error(`Erro ao validar agendamento: ${message}`);
       throw new BadRequestException('Erro ao validar agendamento');
     }
+  }
+
+  async createAppointment(payload: {
+    clienteId: number;
+    servicoId: number;
+    profissionalId: number;
+    dataHora: string;
+    valor?: number;
+    observacoes?: string;
+  }): Promise<any> {
+    const { clienteId, servicoId, profissionalId, dataHora, valor, observacoes } = payload;
+
+    const servicos = await this.servicosService.getServicos({});
+    const servico = servicos?.data?.find((item: any) => item.id === servicoId);
+    if (!servico) {
+      throw new NotFoundException('Serviço não encontrado');
+    }
+
+    const cliente = await this.clientesService.getClientePorId(clienteId);
+    if (!cliente) {
+      throw new NotFoundException('Cliente não encontrado');
+    }
+
+    const profissionais = await this.profissionaisService.getProfissionais({});
+    const profissional = profissionais?.data?.find((item: any) => item.id === profissionalId);
+    if (!profissional) {
+      throw new NotFoundException('Profissional não encontrado');
+    }
+
+    const duracaoEmMinutos = Number(servico.duracaoEmMinutos ?? servico.duracao ?? 0);
+    const requestPayload = {
+      servicoId,
+      clienteId,
+      profissionalId,
+      dataHoraInicio: dataHora,
+      duracaoEmMinutos,
+      valor: valor ?? Number(servico.preco ?? 0),
+      observacoes: observacoes ?? null,
+      confirmado: false,
+    };
+
+    await this.agendamentosService.validateLocalAgendamentoRules(requestPayload);
+
+    const preparedRequest =
+      this.agendamentosService.prepareCreateAgendamentoRequest(requestPayload);
+    const created = await this.agendamentosService.createAgendamento(preparedRequest);
+
+    return {
+      created: true,
+      agendamento: created,
+      clienteId,
+      servicoId,
+      profissionalId,
+      dataHoraInicio: dataHora,
+      valor: requestPayload.valor,
+      observacoes: requestPayload.observacoes,
+    };
   }
 
   /**
@@ -432,6 +493,13 @@ export class BookingService {
    * @param dataIso - Data em formato YYYY-MM-DD
    * @returns Data formatada (ex: "segunda-feira, 15 de agosto de 2026")
    */
+  private toDateKey(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
   private formatData(dataIso: string): string {
     const diasSemana = [
       'domingo',

@@ -1,5 +1,16 @@
-﻿import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+﻿import {
+  BadRequestException,
+  ConflictException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { TrinksService } from '../trinks.service';
+import { ClientesService } from '../clientes/clientes.service';
+import { ProfissionaisService } from '../profissionais/profissionais.service';
+import { ServicosService } from '../servicos/servicos.service';
 import {
   TrinksAgendamentosResponse,
   TrinksAgendamentosQuery,
@@ -16,7 +27,12 @@ import { CancelamentoAgendamentoModel } from './agendamentos.types';
 export class AgendamentosService {
   private readonly logger = new Logger(AgendamentosService.name);
 
-  constructor(private readonly trinksService: TrinksService) {}
+  constructor(
+    private readonly trinksService: TrinksService,
+    private readonly clientesService: ClientesService,
+    private readonly profissionaisService: ProfissionaisService,
+    private readonly servicosService: ServicosService,
+  ) {}
 
   async getAgendamentos(
     query: TrinksAgendamentosQuery,
@@ -254,6 +270,89 @@ export class AgendamentosService {
         this.logger.error(`Trinks API returned unexpected status ${response.status}`, parsed as Error);
         throw new HttpException('Trinks API returned an unexpected error', HttpStatus.BAD_GATEWAY);
     }
+  }
+
+  async validateLocalAgendamentoRules(
+    payload: TrinksCreateAgendamentoPayload,
+  ): Promise<TrinksCreateAgendamentoPayload> {
+    if (!payload || typeof payload.servicoId !== 'number' || payload.servicoId <= 0) {
+      throw new BadRequestException('servicoId é obrigatório e deve ser maior que zero.');
+    }
+
+    if (!payload || typeof payload.clienteId !== 'number' || payload.clienteId <= 0) {
+      throw new BadRequestException('clienteId é obrigatório e deve ser maior que zero.');
+    }
+
+    if (!payload || typeof payload.dataHoraInicio !== 'string' || !payload.dataHoraInicio) {
+      throw new BadRequestException('dataHoraInicio é obrigatório e deve ser string.');
+    }
+
+    const dataHoraInicio = new Date(payload.dataHoraInicio);
+    if (Number.isNaN(dataHoraInicio.getTime())) {
+      throw new BadRequestException('dataHoraInicio inválida.');
+    }
+
+    if (
+      typeof payload.duracaoEmMinutos !== 'number' ||
+      Number.isNaN(payload.duracaoEmMinutos) ||
+      payload.duracaoEmMinutos <= 0
+    ) {
+      throw new BadRequestException('duracaoEmMinutos deve ser maior que zero.');
+    }
+
+    try {
+      await this.clientesService.getClientePorId(payload.clienteId);
+    } catch (error) {
+      throw new UnprocessableEntityException('Cliente não encontrado na Trinks.');
+    }
+
+    const servicos = await this.servicosService.getServicos({});
+    const servico = servicos?.data?.find((item: any) => item.id === payload.servicoId);
+    if (!servico) {
+      throw new UnprocessableEntityException('Serviço não encontrado na Trinks.');
+    }
+
+    if (
+      payload.profissionalId === undefined ||
+      payload.profissionalId === null ||
+      Number.isNaN(Number(payload.profissionalId))
+    ) {
+      throw new UnprocessableEntityException('Profissional é obrigatório para o agendamento.');
+    }
+
+    const profissionais = await this.profissionaisService.getProfissionais({});
+    const profissional = profissionais?.data?.find(
+      (item: any) => item.id === payload.profissionalId,
+    );
+    if (!profissional) {
+      throw new UnprocessableEntityException('Profissional não encontrado na Trinks.');
+    }
+
+    const data = `${dataHoraInicio.getFullYear()}-${String(
+      dataHoraInicio.getMonth() + 1,
+    ).padStart(2, '0')}-${String(dataHoraInicio.getDate()).padStart(2, '0')}`;
+    const horario = `${String(dataHoraInicio.getHours()).padStart(2, '0')}:${String(
+      dataHoraInicio.getMinutes(),
+    ).padStart(2, '0')}`;
+
+    const agenda = await this.getAgenda({
+      profissionalId: Number(payload.profissionalId),
+      data,
+    });
+
+    const horarioDisponivel = agenda?.data?.some((item: any) =>
+      Array.isArray(item.horariosVagos)
+        ? item.horariosVagos.includes(horario)
+        : false,
+    );
+
+    if (!agenda?.data?.length || !horarioDisponivel) {
+      throw new ConflictException(
+        `Horário ${horario} não está disponível para o profissional ${payload.profissionalId}.`,
+      );
+    }
+
+    return payload;
   }
 
   prepareCreateAgendamentoRequest(
