@@ -1,147 +1,354 @@
 # Contexto geral da aplicação
 
-## Visão resumida
+**Atualizado em:** 14/08/2026
+**Branch de referência:** `main`
 
-O Booking Hub atual é um backend em NestJS que funciona como uma camada de integração com a API da Trinks. O objetivo principal da aplicação, no momento, é expor endpoints locais que encapsulam operações de agendamentos, clientes, profissionais e serviços, sem depender de um banco de dados próprio.
+## 1. Objetivo atual
 
-A arquitetura está em estágio de MVP e privilegia simplicidade e integração com o provedor externo, em vez de uma modelagem de domínio completa.
+O Booking Hub é um backend intermediário entre o produto e plataformas externas de agendamento, com a Trinks como primeira integração.
 
-## Stack atual
+O objetivo do MVP é construir primeiro uma base funcional e verificável para:
 
-- NestJS
-- TypeScript
-- `@nestjs/config` para leitura de variáveis de ambiente
-- `@nestjs/swagger` para geração de documentação OpenAPI
-- `class-validator` e `class-transformer` para validação global
-- Fetch nativo do runtime para comunicação com a API da Trinks
-
-## Estrutura principal
-
-- `src/main.ts` — bootstrap da aplicação
-- `src/app.module.ts` — registro dos módulos globais
-- `src/modules/health` — health check do backend
-- `src/integrations/trinks` — módulo central de integração com a Trinks
-- `src/common/filters/http-exception.filter.ts` — filtro global de exceções
-
-## Módulos e responsabilidades
-
-### `HealthModule`
-
-Responsável por expor a rota de verificação de vida da aplicação.
-
-Endpoint:
-
-- `GET /api/v1/health`
-
-Resposta esperada:
-
-```json
-{ "status": "ok" }
+```text
+Cliente / canal de comunicação
+        ↓
+Booking Hub
+        ↓
+Camada Booking
+        ↓
+Integração Trinks
 ```
 
-### `TrinksModule`
+A integração com WhatsApp e IA já possui uma implementação inicial, mas ainda não representa o fluxo completo de negócio do produto.
 
-Módulo responsável por consolidar todas as integrações com a API Trinks. Ele reúne os controllers e serviços de:
+## 2. Decisões atuais do MVP
 
-- agendamentos
-- clientes
-- profissionais
-- serviços
+O projeto foi simplificado para evitar infraestrutura prematura.
 
-Todos os endpoints desse módulo são montados sob o prefixo `/api/v1/trinks`.
+Não existe atualmente:
 
-## Regras de integração
+- banco de dados;
+- Prisma;
+- persistência externa de conversas;
+- filas;
+- eventos;
+- microsserviços;
+- rate limiter complexo;
+- retry automático para a Trinks;
+- autenticação própria de usuários/clientes.
 
-### Configuração
+O estado de conversas utilizado pelo protótipo fica em memória.
 
-A classe `TrinksService` valida a presença das variáveis abaixo:
+A regra é simples:
 
-- `TRINKS_API_KEY`
-- `TRINKS_BASE_URL`
-- `TRINKS_ESTABELECIMENTO_ID`
+> Adicionar infraestrutura somente quando uma necessidade concreta do produto exigir.
 
-Se qualquer uma estiver faltando, a aplicação responde com erro interno do servidor.
+## 3. Stack
 
-### Autenticação
+- NestJS 11
+- TypeScript 5.7
+- Node.js
+- REST API
+- `fetch` nativo para chamadas HTTP externas
+- `@nestjs/config`
+- Swagger / OpenAPI
+- `class-validator`
+- `class-transformer`
+- Jest disponível no projeto, com testes automatizados existentes
 
-A API da Trinks exige o header:
+## 4. Estrutura atual
+
+```text
+src/
+├── ai/
+│   ├── ai.module.ts
+│   ├── ai.service.ts
+│   ├── ai.types.ts
+│   └── prompts/
+│       └── system.prompt.txt
+│
+├── common/
+│   └── filters/
+│       └── http-exception.filter.ts
+│
+├── integrations/
+│   └── trinks/
+│       ├── agendamentos/
+│       ├── assinaturas/
+│       ├── clientes/
+│       ├── planos/
+│       ├── profissionais/
+│       ├── servicos/
+│       ├── trinks.module.ts
+│       └── trinks.service.ts
+│
+└── modules/
+    ├── booking/
+    ├── conversation-state/
+    ├── health/
+    ├── validators/
+    └── whatsapp/
+```
+
+A integração Trinks é organizada por domínio para manter controllers, services e types próximos da funcionalidade correspondente.
+
+## 5. Bootstrap da aplicação
+
+`src/main.ts` configura:
+
+- prefixo global `/api/v1`;
+- CORS;
+- `ValidationPipe` global com `whitelist`, `forbidNonWhitelisted` e `transform`;
+- `HttpExceptionFilter` global;
+- Swagger em `/docs`;
+- porta definida por `PORT`, com padrão `3000`.
+
+## 6. Integração Trinks
+
+A integração é HTTP direta, sem SDK oficial.
+
+Headers utilizados:
 
 ```http
 X-Api-Key: <TRINKS_API_KEY>
+estabelecimentoId: <TRINKS_ESTABELECIMENTO_ID>
 ```
 
-Além disso, o header `estabelecimentoId` também é enviado para as requisições. Esse valor vem da variável de ambiente `TRINKS_ESTABELECIMENTO_ID` e não deve ser informado pelo cliente.
+Configuração:
 
-### Normalização de dados
+```env
+TRINKS_API_KEY=...
+TRINKS_BASE_URL=...
+TRINKS_ESTABELECIMENTO_ID=232903
+```
 
-O `TrinksService` também centraliza conversões úteis, como:
+O estabelecimento usado no MVP é:
 
-- conversão de datas no formato brasileiro (`dd/MM/yyyy`) para ISO
-- ajuste do path da URL para o endpoint de profissionais por data
-- montagem da URL final com o prefixo `/v1` quando necessário
+```text
+232903 — Crazy Dog Barber
+```
 
-## Endpoints expostos na API
+O `estabelecimentoId` é configuração da integração e não deve ser recebido do usuário.
 
-### Saúde
+A API Key real nunca deve ser versionada.
 
-- `GET /api/v1/health`
+### Domínios presentes no código
 
-### Agendamentos
+- Agendamentos
+- Clientes
+- Assinaturas
+- Planos
+- Profissionais
+- Serviços
 
-#### Proxy Trinks já implementado
+### Limites conhecidos
 
-- `GET /api/v1/trinks/agendamentos`
-- `GET /api/v1/trinks/agenda`
-- `GET /api/v1/trinks/agendamentos/profissionais`
-- `GET /api/v1/trinks/disponibilidade`
-- `POST /api/v1/trinks/agendamentos`
-- `PUT /api/v1/trinks/agendamentos/:id`
-- `PATCH /api/v1/trinks/agendamentos/:agendamentoId/status/cancelado`
-- `POST /api/v1/trinks/agendamentos/prepare`
+- 60 requisições/minuto
+- 5.000 requisições/mês
+- `429 Too Many Requests` quando excedido
 
-#### Fluxo de negócio local ainda não implementado
+O projeto não implementa retry automático nem rate limiter complexo neste momento.
 
-- regras locais de criação e validação do agendamento
-- persistência local em banco de dados
-- validação de disponibilidade e conflitos
-- confirmação/cancelamento com regras de negócio próprias do Booking Hub
-- modelagem de domínio e camada de aplicação separadas da API Trinks
+## 7. Agendamentos
 
-### Clientes
+O recurso de agendamentos já possui integração para:
 
-- `GET /api/v1/trinks/clientes`
-- `GET /api/v1/trinks/clientes/:id`
-- `POST /api/v1/trinks/clientes`
+- consulta de agendamentos;
+- consulta de agenda de profissionais;
+- consulta de disponibilidade;
+- criação de agendamento;
+- edição de agendamento;
+- cancelamento;
+- preparação do payload de criação.
 
-### Profissionais
+A criação/edição/cancelamento são chamadas de integração e ainda não formam um fluxo completo de negócio do Booking Hub.
 
-- `GET /api/v1/trinks/profissionais`
-- `GET /api/v1/trinks/profissionais/:profissionalId/servicos`
-- `GET /api/v1/trinks/profissionais/categoria/:servicoCategoriaEstabelecimentoId`
+A consulta de agendamentos aceita paginação, cliente e período (`dataInicio`/`dataFim`). O Booking Hub não percorre automaticamente todas as páginas.
 
-### Serviços
+Foi validada a normalização de datas brasileiras para o formato esperado pela Trinks.
 
-- `GET /api/v1/trinks/servicos`
+Exemplo validado:
 
-## Observações de negócio e MVP
+```text
+12/08/2026
+→
+dataInicio=2026-08-12T00:00:00
+dataFim=2026-08-12T23:59:59
+```
 
-O backend ainda não suporta:
+A documentação específica está em [`trinks-agendamentos.md`](./trinks-agendamentos.md).
 
-- persistência local em banco de dados
-- autenticação de usuários ou clientes
-- fluxo completo de agendamento com regras de negócio do Booking Hub
-- separação completa de domínio e aplicação
+## 8. Clientes
 
-O comportamento atual é principalmente de adaptação da API Trinks para um backend central e controlado, com validações locais e tratamento de erro padronizado.
+A integração de clientes está implementada com:
 
-## Documentação e exposição
+```http
+GET  /api/v1/trinks/clientes
+GET  /api/v1/trinks/clientes/:id
+POST /api/v1/trinks/clientes
+```
 
-A aplicação gera a documentação Swagger em:
+O recurso suporta filtros como nome, CPF, e-mail, telefone, datas de cadastro/alteração, paginação e `incluirDetalhes`.
 
-- `http://localhost:3000/docs`
+A camada `BookingService` utiliza essa integração para buscar clientes por telefone e CPF.
 
-A API também habilita CORS e usa prefixo global `api/v1` em todos os endpoints.
+## 9. Demais recursos Trinks
 
-## Resumo do estado atual
+Também existem integrações para:
 
-O sistema está em uma fase inicial, mas já funcional como backend de integração. A parte mais relevante implementada é a ponte entre o Booking Hub e a Trinks para consulta e manipulação de dados de agendamento, clientes, profissionais e serviços, sendo adequado para evoluir para regras de negócio e persistência no futuro.
+```http
+GET /api/v1/trinks/assinaturas
+GET /api/v1/trinks/planos
+GET /api/v1/trinks/profissionais
+GET /api/v1/trinks/profissionais/:profissionalId/servicos
+GET /api/v1/trinks/profissionais/categoria/:servicoCategoriaEstabelecimentoId
+GET /api/v1/trinks/servicos
+```
+
+Esses recursos estão na camada de integração e devem ser tratados como operações sobre a API externa, não como domínio completo do Booking Hub.
+
+## 10. Camada Booking
+
+`src/modules/booking` funciona como uma camada intermediária orientada às necessidades do produto.
+
+Atualmente possui operações para:
+
+- buscar cliente por telefone;
+- buscar cliente por CPF;
+- consultar disponibilidade de um profissional em uma data;
+- consultar disponibilidade em uma operação chamada de múltiplos dias;
+- listar planos;
+- listar serviços;
+- listar profissionais;
+- validar agendamento.
+
+### Limitação importante
+
+A operação `getAvailabilityMultipleDays` existente no código atualmente consulta apenas `dataInicio` e retorna um único dia. O parâmetro `dataFim` é recebido pelo controller, mas não resulta em uma varredura real do intervalo.
+
+Não documentar essa operação como busca completa de vários dias até que isso seja implementado.
+
+## 11. Validadores
+
+O módulo `validators` contém validadores específicos para:
+
+- CPF;
+- telefone;
+- nome.
+
+Eles são utilizados pela camada Booking e servem para normalizar/validar dados antes das consultas à Trinks.
+
+## 12. Estado conversacional
+
+`ConversationStateService` mantém o estado das conversas em memória.
+
+O estado inclui, entre outros:
+
+- identificador da conversa;
+- telefone normalizado;
+- stage atual;
+- intenção anterior;
+- dados do cliente;
+- dados de agendamento;
+- histórico de mensagens;
+- necessidade de atendimento humano.
+
+Não existe persistência em banco nesta fase.
+
+## 13. IA
+
+`AIService` integra com a API da xAI usando formato compatível com OpenAI.
+
+Configurações principais:
+
+```env
+GROK_API_KEY=...
+GROK_MODEL=grok-2-1212
+AI_MAX_TOKENS=1024
+AI_TEMPERATURE=0.7
+```
+
+O prompt é carregado de:
+
+```text
+src/ai/prompts/system.prompt.txt
+```
+
+A IA já consegue receber histórico e produzir uma resposta textual.
+
+### Limitação atual
+
+A extração estruturada de intenção e entidades ainda não está implementada como fluxo efetivo. O código possui tipos para intenção/entidades, mas o `WhatsAppService` ainda depende principalmente de regras simples para decidir `continue`, `escalate` ou `complete`.
+
+## 14. WhatsApp
+
+O `WhatsAppController` possui endpoints de webhook, health, teste de mensagem e consulta de conversa.
+
+O `WhatsAppService` atualmente:
+
+1. normaliza o telefone;
+2. cria/recupera a conversa;
+3. salva a mensagem;
+4. monta o contexto;
+5. chama o `AIService`;
+6. salva a resposta;
+7. identifica escalação/encerramento por regras simples;
+8. avança stages básicos.
+
+### Limitações atuais
+
+- não envia resposta para a API real do WhatsApp;
+- não possui NLU estruturado completo;
+- não executa automaticamente as ações de Booking a partir da intenção da IA;
+- não conclui o fluxo real de agendamento/cancelamento/reagendamento.
+
+## 15. Inconsistências conhecidas de rota
+
+O `main.ts` aplica `/api/v1` globalmente, enquanto os controllers de Booking e WhatsApp foram declarados com `api/...` no decorator.
+
+Por isso, atualmente essas rotas resultam em:
+
+```text
+/api/v1/api/booking/...
+/api/v1/api/whatsapp/...
+```
+
+Isso é uma inconsistência de implementação e deve ser corrigido antes de considerar essas rotas estáveis.
+
+Também existe um problema no endpoint de consulta de conversa: a rota declara `:conversationId`, mas o controller tenta obter o valor com `@Body()` em vez de `@Param()`.
+
+## 16. Estado atual do MVP
+
+### Funcional
+
+- estrutura NestJS;
+- integração Trinks por domínio;
+- configuração por `.env`;
+- consulta de agendamentos;
+- consulta de agenda/disponibilidade;
+- operações de clientes;
+- operações de profissionais, serviços, planos e assinaturas;
+- camada inicial Booking;
+- validadores;
+- estado conversacional em memória;
+- integração inicial com Grok;
+- webhook/controlador WhatsApp inicial;
+- Swagger;
+- tratamento global de validação e exceções.
+
+### Ainda não concluído
+
+- NLU estruturado confiável;
+- fluxo completo de agendamento orientado pela conversa;
+- cancelamento/reagendamento como fluxo de produto;
+- envio efetivo de mensagens pela API do WhatsApp;
+- persistência de conversas;
+- regras de negócio completas desacopladas da Trinks.
+
+## 17. Próximo foco
+
+A prioridade é consolidar a camada de integração e Booking antes de avançar para automação conversacional completa.
+
+A próxima funcionalidade deve ser pequena, verificável e baseada no comportamento real da Trinks.
+
+> **Primeiro funcionalidade verificável; depois infraestrutura.**
