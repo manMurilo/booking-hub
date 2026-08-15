@@ -59,6 +59,9 @@ Essas variáveis são exigidas pela classe `TrinksService` para validar e montar
 - `POST /api/v1/trinks/agendamentos`
 - `PUT /api/v1/trinks/agendamentos/:id`
 - `PATCH /api/v1/trinks/agendamentos/:agendamentoId/status/cancelado`
+- `POST /api/v1/trinks/agendamentos/prepare`
+
+Nota: esses endpoints funcionam como proxy da API Trinks e já estão expostos no backend; o fluxo de negócio local do Booking Hub ainda não foi implementado nesta etapa.
 
 ### Trinks - clientes
 

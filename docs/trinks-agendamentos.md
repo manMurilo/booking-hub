@@ -8,6 +8,30 @@ O fluxo de agendamento da aplicação continua sendo uma integração direta com
 
 Para uma visão mais ampla da arquitetura atual do projeto, consulte o documento [contexto-geral-da-aplicacao.md](./contexto-geral-da-aplicacao.md) e o [README.md](../README.md).
 
+## Visão geral da implementação atual
+
+O Booking Hub expõe dois grupos de rotas para agendamento:
+
+### 1) Proxy Trinks já implementado
+
+- `GET /api/v1/trinks/agendamentos`
+- `GET /api/v1/trinks/agenda`
+- `GET /api/v1/trinks/agendamentos/profissionais`
+- `GET /api/v1/trinks/disponibilidade`
+- `POST /api/v1/trinks/agendamentos`
+- `PUT /api/v1/trinks/agendamentos/:id`
+- `PATCH /api/v1/trinks/agendamentos/:agendamentoId/status/cancelado`
+- `POST /api/v1/trinks/agendamentos/prepare`
+
+### 2) Fluxo de negócio local ainda não implementado
+
+- criação local completa de agendamento com regras do Booking Hub
+- persistência local de agendamentos
+- confirmação/cancelamento com regras próprias do sistema
+- modelagem de domínio local do agendamento
+
+Nesse momento, o backend já aplica uma camada mínima de validação local antes de encaminhar a criação para a Trinks: verifica cliente, serviço, profissional e disponibilidade básica do profissional para o horário solicitado.
+
 ## Configuração
 
 A integração utiliza as seguintes variáveis de ambiente:
@@ -33,7 +57,7 @@ X-Api-Key: <TRINKS_API_KEY>
 
 No Booking Hub, o `estabelecimentoId` sempre deve vir da variável de ambiente `TRINKS_ESTABELECIMENTO_ID` e não deve ser fornecido pelo usuário.
 
-## 1. Listar agendamentos
+## 1. Proxy: listar agendamentos
 
 Endpoint:
 
@@ -57,7 +81,7 @@ Notas:
 - A resposta possui paginação.
 - Atualmente, o Booking Hub não busca automaticamente todas as páginas.
 
-## 2. Criar agendamento
+## 2. Proxy: criar agendamento
 
 Endpoint:
 
@@ -92,9 +116,10 @@ Parâmetros obrigatórios:
 Observações:
 
 - `profissionalId` e `observacoes` podem ser nulos.
-- Esta funcionalidade ainda não faz parte do fluxo implementado do Booking Hub.
+- Este endpoint já existe no backend e encaminha a chamada para a Trinks.
+- O fluxo de negócio local do Booking Hub continua pendente.
 
-## 3. Obter agendamento
+## 3. Obter agendamento (documentado pela API Trinks)
 
 Recurso:
 
@@ -109,7 +134,7 @@ Notas:
 
 - Este recurso está documentado, mas ainda não faz parte do fluxo principal implementado do Booking Hub.
 
-## 4. Configurações de agendamento
+## 4. Configurações de agendamento (documentado pela API Trinks)
 
 Endpoint:
 
@@ -125,7 +150,7 @@ Notas:
 
 - Este recurso está documentado pela API Trinks, mas ainda não foi integrado ao fluxo do Booking Hub.
 
-## 5. Editar agendamento
+## 5. Proxy: editar agendamento
 
 Endpoint:
 
@@ -145,9 +170,10 @@ Body esperado:
 
 Notas:
 
-- Este recurso ainda não está implementado no fluxo do Booking Hub.
+- Este endpoint já foi exposto pelo backend e repassa a alteração para a Trinks.
+- A regra de negócio local ainda não foi adicionada ao Booking Hub.
 
-## 6. Confirmar agendamento
+## 6. Confirmar agendamento (ainda não implementado localmente)
 
 Endpoint:
 
@@ -164,7 +190,7 @@ Notas:
 
 - Esta ação ainda não está implementada no fluxo principal do Booking Hub.
 
-## 7. Cancelar agendamento
+## 7. Proxy: cancelar agendamento
 
 Endpoint:
 
@@ -188,9 +214,25 @@ Parâmetros:
 
 Notas:
 
-- Esta ação ainda não está implementada no fluxo principal do Booking Hub.
+- Este endpoint já existe e encaminha a operação para a Trinks.
+- O cancelamento com regras de negócio locais do Booking Hub ainda não foi implementado.
 
-## 8. Profissionais com agenda
+## 8. Helper de preparação do payload
+
+Endpoint:
+
+```
+POST /api/v1/trinks/agendamentos/prepare
+```
+
+Descrição:
+
+- prepara o payload para a requisição de criação de agendamento
+- centraliza a montagem do corpo usado pela API Trinks
+- não representa a regra de negócio local do Booking Hub
+- é um helper de integração, não um fluxo de agendamento do produto
+
+## 9. Profissionais com agenda
 
 Este é o recurso mais importante para a próxima etapa do MVP.
 

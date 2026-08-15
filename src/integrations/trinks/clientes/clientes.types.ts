@@ -1,4 +1,4 @@
-export interface TrinksTelefone {
+﻿export interface TrinksTelefone {
   ddi: string;
   ddd: string;
   telefone: string;

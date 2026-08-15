@@ -1,4 +1,4 @@
-export interface TrinksProfissionaisResponse<T = unknown> {
+﻿export interface TrinksProfissionaisResponse<T = unknown> {
   data: T[];
   page: number;
   pageSize: number;

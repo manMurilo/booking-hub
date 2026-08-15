@@ -1,0 +1,22 @@
+{
+  "nome": "Cliente Teste Booking Hub",
+  "email": "cliente.teste.bookinghub@example.com",
+  "cpf": "05255106992",
+  "genero": "M",
+  "observacoes": "Cadastro de teste via Booking Hub",
+  "codigoExterno": "BHB-TEST-01",
+  "telefones": [
+    {
+      "ddi": "55",
+      "ddd": "11",
+      "numero": "912345678",
+      "tipoId": 1
+    }
+  ],
+  "preferencias": {
+    "recebeSMSLembreteDeAgendamento": true,
+    "recebeEmailLembreteDeAgendamento": true,
+    "recebeSMSMarketing": false,
+    "recebeEmailMarketing": false
+  }
+}
