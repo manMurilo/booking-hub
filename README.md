@@ -74,14 +74,9 @@ Configuração principal:
 ```env
 TRINKS_API_KEY=...
 TRINKS_BASE_URL=...
-TRINKS_ESTABELECIMENTO_ID=232903
+TRINKS_ESTABELECIMENTO_ID=
 ```
 
-Estabelecimento utilizado no MVP:
-
-```text
-232903 — Crazy Dog Barber
-```
 
 A API Key nunca deve ser versionada.
 
@@ -245,7 +240,7 @@ NODE_ENV=development
 
 TRINKS_BASE_URL=...
 TRINKS_API_KEY=...
-TRINKS_ESTABELECIMENTO_ID=232903
+TRINKS_ESTABELECIMENTO_ID=
 
 GROK_API_KEY=...
 GROK_MODEL=grok-2-1212
