@@ -88,6 +88,8 @@ O `TrinksService` também centraliza conversões úteis, como:
 
 ### Agendamentos
 
+#### Proxy Trinks já implementado
+
 - `GET /api/v1/trinks/agendamentos`
 - `GET /api/v1/trinks/agenda`
 - `GET /api/v1/trinks/agendamentos/profissionais`
@@ -95,6 +97,15 @@ O `TrinksService` também centraliza conversões úteis, como:
 - `POST /api/v1/trinks/agendamentos`
 - `PUT /api/v1/trinks/agendamentos/:id`
 - `PATCH /api/v1/trinks/agendamentos/:agendamentoId/status/cancelado`
+- `POST /api/v1/trinks/agendamentos/prepare`
+
+#### Fluxo de negócio local ainda não implementado
+
+- regras locais de criação e validação do agendamento
+- persistência local em banco de dados
+- validação de disponibilidade e conflitos
+- confirmação/cancelamento com regras de negócio próprias do Booking Hub
+- modelagem de domínio e camada de aplicação separadas da API Trinks
 
 ### Clientes
 

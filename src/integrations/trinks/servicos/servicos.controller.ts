@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
+﻿import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
 import { ServicosService } from './servicos.service';
 import {
   TrinksServicosQuery,

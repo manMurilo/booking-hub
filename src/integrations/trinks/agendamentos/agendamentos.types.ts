@@ -1,4 +1,4 @@
-export interface TrinksAgendamentosResponse<T = unknown> {
+﻿export interface TrinksAgendamentosResponse<T = unknown> {
   data: T[];
   page: number;
   pageSize: number;

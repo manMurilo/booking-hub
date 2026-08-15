@@ -1,23 +1,19 @@
 ﻿import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { TrinksService } from '../trinks.service';
-import {
-  TrinksServicosResponse,
-  TrinksServicosQuery,
-  TrinksServico,
-} from './servicos.types';
+import { PlanoClienteDTO, PlanosResponse, PlanosQuery } from './planos.types';
 
 @Injectable()
-export class ServicosService {
-  private readonly logger = new Logger(ServicosService.name);
+export class PlanosService {
+  private readonly logger = new Logger(PlanosService.name);
 
   constructor(private readonly trinksService: TrinksService) {}
 
-  async getServicos(
-    query: TrinksServicosQuery,
-  ): Promise<TrinksServicosResponse<TrinksServico>> {
+  async getPlanos(
+    query: PlanosQuery,
+  ): Promise<PlanosResponse<PlanoClienteDTO>> {
     const { apiKey, baseUrl, estabelecimentoId } =
       this.trinksService.getApiConfig();
-    const url = this.trinksService.buildApiUrl('/servicos', baseUrl);
+    const url = this.trinksService.buildApiUrl('/clube/planos', baseUrl);
 
     if (query.page !== undefined) {
       url.searchParams.set('page', String(query.page));
@@ -25,14 +21,14 @@ export class ServicosService {
     if (query.pageSize !== undefined) {
       url.searchParams.set('pageSize', String(query.pageSize));
     }
+    if (query.somenteAtivos !== undefined) {
+      url.searchParams.set('somenteAtivos', String(query.somenteAtivos));
+    }
+    if (query.ordenarPor !== undefined) {
+      url.searchParams.set('ordenarPor', String(query.ordenarPor));
+    }
     if (query.nome !== undefined) {
       url.searchParams.set('nome', String(query.nome));
-    }
-    if (query.id !== undefined) {
-      url.searchParams.set('id', String(query.id));
-    }
-    if (query.ativo !== undefined) {
-      url.searchParams.set('ativo', String(query.ativo));
     }
 
     const headers = {
@@ -76,7 +72,7 @@ export class ServicosService {
     }
 
     if (response.ok) {
-      return payload as TrinksServicosResponse<TrinksServico>;
+      return payload as PlanosResponse<PlanoClienteDTO>;
     }
 
     switch (response.status) {
@@ -97,20 +93,14 @@ export class ServicosService {
           HttpStatus.NOT_FOUND,
         );
       case HttpStatus.TOO_MANY_REQUESTS:
-        this.logger.warn(
-          'Trinks rate limit reached (HTTP 429). No retry will be performed.',
-        );
+        this.logger.warn('Trinks API rate limit reached');
         throw new HttpException(
-          'Trinks rate limit reached',
+          'Trinks API rate limit exceeded',
           HttpStatus.TOO_MANY_REQUESTS,
         );
       default:
-        this.logger.error(
-          `Trinks API returned unexpected status ${response.status}`,
-          payload as Error,
-        );
         throw new HttpException(
-          'Trinks API returned an unexpected error',
+          payload || 'Unknown error from Trinks API',
           HttpStatus.BAD_GATEWAY,
         );
     }

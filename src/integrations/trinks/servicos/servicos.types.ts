@@ -1,4 +1,4 @@
-export interface TrinksServico {
+﻿export interface TrinksServico {
   id: number;
   nome: string;
   descricao?: string | null;

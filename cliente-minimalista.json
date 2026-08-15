@@ -1,0 +1,14 @@
+{
+  "nome": "Cliente Minimalista",
+  "telefones": [
+    {
+      "tipoId": 1
+    }
+  ],
+  "preferencias": {
+    "recebeSMSLembreteDeAgendamento": false,
+    "recebeEmailLembreteDeAgendamento": false,
+    "recebeSMSMarketing": false,
+    "recebeEmailMarketing": false
+  }
+}

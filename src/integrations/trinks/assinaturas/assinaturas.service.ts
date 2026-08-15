@@ -1,23 +1,23 @@
 ﻿import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { TrinksService } from '../trinks.service';
 import {
-  TrinksServicosResponse,
-  TrinksServicosQuery,
-  TrinksServico,
-} from './servicos.types';
+  AssinaturaDTO,
+  AssinaturasResponse,
+  AssinaturasQuery,
+} from './assinaturas.types';
 
 @Injectable()
-export class ServicosService {
-  private readonly logger = new Logger(ServicosService.name);
+export class AssinaturasService {
+  private readonly logger = new Logger(AssinaturasService.name);
 
   constructor(private readonly trinksService: TrinksService) {}
 
-  async getServicos(
-    query: TrinksServicosQuery,
-  ): Promise<TrinksServicosResponse<TrinksServico>> {
+  async getAssinaturas(
+    query: AssinaturasQuery,
+  ): Promise<AssinaturasResponse<AssinaturaDTO>> {
     const { apiKey, baseUrl, estabelecimentoId } =
       this.trinksService.getApiConfig();
-    const url = this.trinksService.buildApiUrl('/servicos', baseUrl);
+    const url = this.trinksService.buildApiUrl('/clube/assinaturas', baseUrl);
 
     if (query.page !== undefined) {
       url.searchParams.set('page', String(query.page));
@@ -25,14 +25,20 @@ export class ServicosService {
     if (query.pageSize !== undefined) {
       url.searchParams.set('pageSize', String(query.pageSize));
     }
-    if (query.nome !== undefined) {
-      url.searchParams.set('nome', String(query.nome));
+    if (query.clienteCpf !== undefined) {
+      url.searchParams.set('clienteCpf', String(query.clienteCpf));
     }
-    if (query.id !== undefined) {
-      url.searchParams.set('id', String(query.id));
+    if (query.clienteNome !== undefined) {
+      url.searchParams.set('clienteNome', String(query.clienteNome));
     }
-    if (query.ativo !== undefined) {
-      url.searchParams.set('ativo', String(query.ativo));
+    if (query.planoId !== undefined) {
+      url.searchParams.set('planoId', String(query.planoId));
+    }
+    if (query.status !== undefined) {
+      url.searchParams.set('status', String(query.status));
+    }
+    if (query.ordenarPor !== undefined) {
+      url.searchParams.set('ordenarPor', String(query.ordenarPor));
     }
 
     const headers = {
@@ -76,7 +82,7 @@ export class ServicosService {
     }
 
     if (response.ok) {
-      return payload as TrinksServicosResponse<TrinksServico>;
+      return payload as AssinaturasResponse<AssinaturaDTO>;
     }
 
     switch (response.status) {
@@ -97,20 +103,14 @@ export class ServicosService {
           HttpStatus.NOT_FOUND,
         );
       case HttpStatus.TOO_MANY_REQUESTS:
-        this.logger.warn(
-          'Trinks rate limit reached (HTTP 429). No retry will be performed.',
-        );
+        this.logger.warn('Trinks API rate limit reached');
         throw new HttpException(
-          'Trinks rate limit reached',
+          'Trinks API rate limit exceeded',
           HttpStatus.TOO_MANY_REQUESTS,
         );
       default:
-        this.logger.error(
-          `Trinks API returned unexpected status ${response.status}`,
-          payload as Error,
-        );
         throw new HttpException(
-          'Trinks API returned an unexpected error',
+          payload || 'Unknown error from Trinks API',
           HttpStatus.BAD_GATEWAY,
         );
     }

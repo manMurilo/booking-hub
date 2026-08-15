@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+﻿import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { TrinksService } from '../trinks.service';
 import {
   TrinksClientesResponse,
@@ -152,6 +152,54 @@ export class ClientesService {
     }
   }
 
+  private formatTrinksErrorMessage(payload: unknown): string {
+    if (!payload || typeof payload !== 'object') {
+      return 'Trinks API returned an unexpected error';
+    }
+
+    const message = (payload as any).message;
+    if (message && typeof message === 'object') {
+      const errors = Array.isArray(message.Errors)
+        ? message.Errors
+        : Array.isArray(message.errors)
+          ? message.errors
+          : undefined;
+
+      if (errors && errors.length > 0) {
+        const details = errors
+          .map((item: any) => {
+            const propertyName =
+              item?.PropertyName ?? item?.propertyName ?? 'Campo';
+            const errorMessage =
+              item?.ErrorMessage ?? item?.errorMessage ?? 'Inválido';
+            return `${propertyName}: ${errorMessage}`;
+          })
+          .join('; ');
+
+        return `Invalid request. ${details}`;
+      }
+
+      if (typeof message === 'string' && message.trim()) {
+        return message;
+      }
+    }
+
+    const detail = (payload as Record<string, unknown>).detail;
+    if (typeof detail === 'string') {
+      return detail;
+    }
+
+    return 'Trinks API returned an unexpected error';
+  }
+
+  private transformClientePayload(
+    payload: AddCliente,
+  ): Record<string, unknown> {
+    // The Trinks API expects camelCase, not PascalCase
+    // According to the OpenAPI spec, the schema uses lowercase field names
+    return payload as unknown as Record<string, unknown>;
+  }
+
   async createCliente(payload: AddCliente): Promise<CreatedIdModel> {
     const { apiKey, baseUrl, estabelecimentoId } =
       this.trinksService.getApiConfig();
@@ -164,47 +212,91 @@ export class ClientesService {
       'Content-Type': 'application/json',
     };
 
+    const transformedPayload = this.transformClientePayload(payload);
+
+    this.logger.debug(
+      'Transformed client payload:',
+      JSON.stringify(transformedPayload),
+    );
+
     let response: Response;
 
     try {
       response = await (globalThis as any).fetch(url.toString(), {
         method: 'POST',
         headers,
-        body: JSON.stringify(payload),
+        body: JSON.stringify(transformedPayload),
       });
     } catch (error) {
-      this.logger.error('Failed to communicate with Trinks API while creating a client', error as Error);
-      throw new HttpException('Failed to communicate with Trinks API', HttpStatus.BAD_GATEWAY);
+      this.logger.error(
+        'Failed to communicate with Trinks API while creating a client',
+        error as Error,
+      );
+      throw new HttpException(
+        'Failed to communicate with Trinks API',
+        HttpStatus.BAD_GATEWAY,
+      );
     }
 
     const responseText = await response.text();
     let parsed: unknown;
 
+    this.logger.debug(
+      `Trinks API response (status ${response.status}):`,
+      responseText,
+    );
+
     try {
       parsed = responseText ? JSON.parse(responseText) : {};
     } catch (error) {
-      this.logger.error('Invalid JSON received from Trinks API while creating a client', error as Error);
-      throw new HttpException('Invalid response from Trinks API', HttpStatus.BAD_GATEWAY);
+      this.logger.error(
+        'Invalid JSON received from Trinks API while creating a client',
+        error as Error,
+      );
+      throw new HttpException(
+        'Invalid response from Trinks API',
+        HttpStatus.BAD_GATEWAY,
+      );
     }
 
     if (response.status === HttpStatus.CREATED) {
       return parsed as CreatedIdModel;
     }
 
+    const trinksErrorMessage = this.formatTrinksErrorMessage(parsed);
+
     switch (response.status) {
       case HttpStatus.UNAUTHORIZED:
       case HttpStatus.FORBIDDEN:
-        throw new HttpException('Trinks API authentication or authorization failed', HttpStatus.BAD_GATEWAY);
+        throw new HttpException(
+          'Trinks API authentication or authorization failed',
+          HttpStatus.BAD_GATEWAY,
+        );
       case HttpStatus.BAD_REQUEST:
-        throw new HttpException(parsed || 'Bad request to Trinks API', HttpStatus.BAD_REQUEST);
+        throw new HttpException(trinksErrorMessage, HttpStatus.BAD_REQUEST);
       case HttpStatus.NOT_FOUND:
-        throw new HttpException('Trinks endpoint not found', HttpStatus.NOT_FOUND);
+        throw new HttpException(
+          'Trinks endpoint not found',
+          HttpStatus.NOT_FOUND,
+        );
       case HttpStatus.TOO_MANY_REQUESTS:
-        this.logger.warn('Trinks rate limit reached (HTTP 429). No retry will be performed.');
-        throw new HttpException('Trinks rate limit reached', HttpStatus.TOO_MANY_REQUESTS);
+        this.logger.warn(
+          'Trinks rate limit reached (HTTP 429). No retry will be performed.',
+        );
+        throw new HttpException(
+          'Trinks rate limit reached',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
       default:
-        this.logger.error(`Trinks API returned unexpected status ${response.status}`, parsed as Error);
-        throw new HttpException('Trinks API returned an unexpected error', HttpStatus.BAD_GATEWAY);
+        this.logger.error(
+          `Trinks API returned unexpected status ${response.status}`,
+          {
+            status: response.status,
+            responseText,
+            parsed,
+          },
+        );
+        throw new HttpException(trinksErrorMessage, HttpStatus.BAD_GATEWAY);
     }
   }
 
@@ -227,7 +319,10 @@ export class ClientesService {
         headers,
       });
     } catch (error) {
-      this.logger.error('Failed to communicate with Trinks API', error as Error);
+      this.logger.error(
+        'Failed to communicate with Trinks API',
+        error as Error,
+      );
       throw new HttpException(
         'Failed to communicate with Trinks API',
         HttpStatus.BAD_GATEWAY,
@@ -240,7 +335,10 @@ export class ClientesService {
     try {
       payload = responseText ? JSON.parse(responseText) : {};
     } catch (error) {
-      this.logger.error('Invalid JSON received from Trinks API', error as Error);
+      this.logger.error(
+        'Invalid JSON received from Trinks API',
+        error as Error,
+      );
       throw new HttpException(
         'Invalid response from Trinks API',
         HttpStatus.BAD_GATEWAY,
@@ -259,15 +357,32 @@ export class ClientesService {
           HttpStatus.BAD_GATEWAY,
         );
       case HttpStatus.BAD_REQUEST:
-        throw new HttpException(payload || 'Bad request to Trinks API', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          payload || 'Bad request to Trinks API',
+          HttpStatus.BAD_REQUEST,
+        );
       case HttpStatus.NOT_FOUND:
-        throw new HttpException('Trinks resource not found', HttpStatus.NOT_FOUND);
+        throw new HttpException(
+          'Trinks resource not found',
+          HttpStatus.NOT_FOUND,
+        );
       case HttpStatus.TOO_MANY_REQUESTS:
-        this.logger.warn('Trinks rate limit reached (HTTP 429). No retry will be performed.');
-        throw new HttpException('Trinks rate limit reached', HttpStatus.TOO_MANY_REQUESTS);
+        this.logger.warn(
+          'Trinks rate limit reached (HTTP 429). No retry will be performed.',
+        );
+        throw new HttpException(
+          'Trinks rate limit reached',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
       default:
-        this.logger.error(`Trinks API returned unexpected status ${response.status}`, payload as Error);
-        throw new HttpException('Trinks API returned an unexpected error', HttpStatus.BAD_GATEWAY);
+        this.logger.error(
+          `Trinks API returned unexpected status ${response.status}`,
+          payload as Error,
+        );
+        throw new HttpException(
+          'Trinks API returned an unexpected error',
+          HttpStatus.BAD_GATEWAY,
+        );
     }
   }
 }
