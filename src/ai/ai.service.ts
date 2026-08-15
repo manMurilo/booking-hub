@@ -21,8 +21,8 @@ export class AIService {
 
   constructor(private configService: ConfigService) {
     this.config = {
-      apiKey: this.configService.get('GROK_API_KEY') || '',
-      model: this.configService.get('GROK_MODEL', 'grok-2-1212'),
+      apiKey: this.configService.get('GEMINI_API_KEY') || '',
+      model: this.configService.get('GEMINI_MODEL', 'gemini-3.5-flash'),
       maxTokens: parseInt(this.configService.get('AI_MAX_TOKENS', '1024')),
       temperature: parseFloat(this.configService.get('AI_TEMPERATURE', '0.7')),
     };
@@ -102,47 +102,134 @@ export class AIService {
   }
 
   /**
-   * Call the LLM API
-   * Currently configured for Grok/OpenAI-compatible APIs
+   * Call the LLM API using Google Gemini Interactions API
+   * Sends conversation history and gets AI response
    *
    * @param messages - Conversation messages
    * @returns LLM response text
    */
   private async callLLM(messages: AIMessage[]): Promise<string> {
+    // Build conversation history for Interactions API
+    // Gemini Interactions API expects messages in parts format
+    const contents = messages.map((msg) => ({
+      role: msg.role === 'system' || msg.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: msg.content }],
+    }));
+
+    // Interactions API payload
     const payload = {
-      model: this.config.model,
-      messages: messages.map((msg) => ({
-        role: msg.role,
-        content: msg.content,
-      })),
-      temperature: this.config.temperature,
-      max_tokens: this.config.maxTokens,
+      contents: contents,
+      generationConfig: {
+        temperature: this.config.temperature,
+        maxOutputTokens: this.config.maxTokens,
+      },
+      safetySettings: [
+        {
+          category: 'HARM_CATEGORY_HARASSMENT',
+          threshold: 'BLOCK_ONLY_HIGH',
+        },
+        {
+          category: 'HARM_CATEGORY_HATE_SPEECH',
+          threshold: 'BLOCK_ONLY_HIGH',
+        },
+        {
+          category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+          threshold: 'BLOCK_ONLY_HIGH',
+        },
+        {
+          category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+          threshold: 'BLOCK_ONLY_HIGH',
+        },
+      ],
     };
 
-    const response = await fetch('https://api.x.ai/openai/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.config.apiKey}`,
-      },
-      body: JSON.stringify(payload),
-    });
+    this.logger.debug(
+      `[AI] Enviando para Gemini Interactions API: model=${this.config.model}, tokens=${this.config.maxTokens}, messages=${messages.length}`,
+    );
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(`LLM API error: ${error.error?.message || response.statusText}`);
+    // Use Interactions API endpoint
+    const url = `https://generativelanguage.googleapis.com/v1/models/${this.config.model}:generateContent?key=${this.config.apiKey}`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        const errorMessage =
+          errorData?.error?.message ||
+          errorData?.error ||
+          response.statusText;
+
+        // Handle specific error types
+        if (
+          errorMessage &&
+          typeof errorMessage === 'string'
+        ) {
+          if (
+            errorMessage.includes('API_KEY_INVALID') ||
+            errorMessage.includes('UNAUTHENTICATED')
+          ) {
+            this.logger.error('[AI] Erro de autenticação: API key inválida ou expirada');
+            throw new Error('Authentication error: Invalid or expired API key');
+          }
+          if (
+            errorMessage.includes('not found') ||
+            errorMessage.includes('no longer available')
+          ) {
+            this.logger.error(`[AI] Modelo não disponível: ${this.config.model}`);
+            throw new Error(
+              `Model "${this.config.model}" is not available. Verify model name at https://ai.google.dev/`,
+            );
+          }
+          if (
+            errorMessage.includes('QUOTA_EXCEEDED') ||
+            errorMessage.includes('RATE_LIMIT_EXCEEDED')
+          ) {
+            this.logger.error('[AI] Cota ou rate limit excedido');
+            throw new Error('API quota or rate limit exceeded');
+          }
+        }
+
+        this.logger.error(
+          `[AI] Erro da API Gemini (${response.status}): ${errorMessage}`,
+        );
+        throw new Error(`LLM API error: ${errorMessage}`);
+      }
+
+      const data = await response.json();
+
+      // Extract response from Interactions API format
+      // Priority: output_text > candidates[0].content.parts[0].text
+      let assistantMessage =
+        data.output_text ||
+        data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!assistantMessage) {
+        this.logger.error(
+          `[AI] Resposta sem conteúdo: ${JSON.stringify(data)}`,
+        );
+        throw new Error('No message in LLM response');
+      }
+
+      this.logger.debug(`[AI] Resposta recebida do Gemini: ${assistantMessage.substring(0, 50)}...`);
+      return assistantMessage;
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes('fetch failed') || error.message.includes('ECONNREFUSED')) {
+          this.logger.error('[AI] Erro de conexão: não conseguiu conectar à API Gemini');
+          throw new Error('Network error: Could not connect to Gemini API');
+        }
+        this.logger.error(`[AI] Erro ao chamar Gemini: ${error.message}`);
+        throw error;
+      }
+      throw new Error('Unknown error calling Gemini API');
     }
-
-    const data = await response.json();
-
-    // Extract message from response (compatible with Grok/OpenAI format)
-    const assistantMessage = data.choices?.[0]?.message?.content;
-
-    if (!assistantMessage) {
-      throw new Error('No message in LLM response');
-    }
-
-    return assistantMessage;
   }
 
   /**

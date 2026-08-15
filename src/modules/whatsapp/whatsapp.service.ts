@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { AIService } from '../../ai/ai.service';
 import { AIMessage } from '../../ai/ai.types';
 import { BookingService } from '../booking/booking.service';
@@ -12,20 +12,135 @@ import {
   ConversationStage,
   UserIntention,
 } from '../conversation-state/conversation-state.types';
+import { BaileysConnectionService } from '../../integrations/whatsapp/baileys-connection.service';
+import { WhatsAppMessageAdapterService } from '../../integrations/whatsapp/whatsapp-message-adapter.service';
+import { WhatsAppIncomingMessage } from '../../integrations/whatsapp/whatsapp-integration.types';
 
 /**
- * WhatsApp Service - Orchestrates AI, Booking, and Conversation State
+ * WhatsApp Service - Orchestrates AI, Booking, Conversation State, and Baileys
  * Main logic for processing customer messages and generating responses
+ *
+ * Responsabilidades:
+ * - Receber mensagens do Baileys (via BaileysConnectionService)
+ * - Normalizar e processar through conversation/AI flow
+ * - Enviar respostas de volta via Baileys
+ * - Manter separação clara entre transporte (Baileys) e lógica de negócio
  */
 @Injectable()
-export class WhatsAppService {
+export class WhatsAppService implements OnModuleInit {
   private readonly logger = new Logger(WhatsAppService.name);
 
   constructor(
     private aiService: AIService,
     private bookingService: BookingService,
     private conversationStateService: ConversationStateService,
+    private baileysConnectionService: BaileysConnectionService,
+    private messageAdapterService: WhatsAppMessageAdapterService,
   ) {}
+
+  /**
+   * Inicializar serviço ao carregar o módulo
+   * Registra handlers para recebimento de mensagens do Baileys
+   */
+  async onModuleInit(): Promise<void> {
+    this.logger.log('[WhatsApp Service] Inicializando...');
+    
+    // Registrar handler para recebimento de mensagens
+    this.baileysConnectionService.onMessage(
+      this.handleIncomingMessageFromBaileys.bind(this),
+    );
+
+    // Registrar handler para mudanças de conexão (para logs)
+    this.baileysConnectionService.onConnectionStateChange((event) => {
+      this.logger.log(`[WhatsApp Service] Estado de conexão: ${event.state} - ${event.message}`);
+    });
+
+    this.logger.log('[WhatsApp Service] Inicializado e aguardando mensagens');
+  }
+
+  /**
+   * Handler chamado quando Baileys recebe uma mensagem
+   * Esta é a entrada de mensagens reais de WhatsApp
+   */
+  private async handleIncomingMessageFromBaileys(baileysMessage: WhatsAppIncomingMessage): Promise<void> {
+    try {
+      // Normalizar mensagem do Baileys para formato interno
+      const normalizedMessage = this.messageAdapterService.normalizeIncomingMessage(
+        baileysMessage,
+      );
+
+      // Converter para formato esperado pelo WhatsAppService
+      const whatsAppMessage: WhatsAppMessage = {
+        from: normalizedMessage.from,
+        text: normalizedMessage.text,
+        timestamp: normalizedMessage.timestamp,
+        messageId: normalizedMessage.messageId,
+      };
+
+      // Log de processamento iniciado
+      this.logger.log(
+        `⚙️  WHATSAPP — PROCESSANDO\n` +
+        `   De: ${whatsAppMessage.from}`,
+      );
+
+      // Processar através do fluxo normal
+      const result = await this.processMessage(whatsAppMessage);
+
+      // Log de resposta gerada
+      this.logger.log(
+        `🤖 AI — RESPOSTA GERADA\n` +
+        `   Para: ${whatsAppMessage.from}\n` +
+        `   Resposta: "${result.aiResponse.substring(0, 100)}${result.aiResponse.length > 100 ? '...' : ''}"`,
+      );
+
+      // Enviar resposta de volta
+      await this.sendResponseViaBaileys(whatsAppMessage.from, result.aiResponse);
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(
+        `❌ WHATSAPP — ERRO AO PROCESSAR\n` +
+        `   De: ${baileysMessage.sender}\n` +
+        `   Erro: ${message}`,
+      );
+      
+      // Enviar mensagem de erro (se a origem estiver disponível)
+      if (baileysMessage.sender) {
+        try {
+          const phoneNumber = this.messageAdapterService.normalizePhoneNumber(baileysMessage.sender);
+          const errorMessage = `Desculpe, ocorreu um erro ao processar sua mensagem. Tente novamente mais tarde.`;
+          await this.sendResponseViaBaileys(baileysMessage.sender, errorMessage);
+        } catch (sendError) {
+          this.logger.error(
+            `❌ WHATSAPP — ERRO AO ENVIAR MENSAGEM DE ERRO\n` +
+            `   Para: ${baileysMessage.sender}`,
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Enviar resposta de volta para o usuário via Baileys
+   */
+  private async sendResponseViaBaileys(to: string, text: string): Promise<void> {
+    const outgoingMessage = this.messageAdapterService.prepareOutgoingMessage(to, text);
+    const result = await this.baileysConnectionService.sendMessage(outgoingMessage);
+
+    if (result.status === 'sent') {
+      this.logger.log(
+        `✅ WHATSAPP — ENVIO CONFIRMADO\n` +
+        `   Para: ${to}\n` +
+        `   Message ID: ${result.messageId}`,
+      );
+    } else {
+      this.logger.error(
+        `❌ WHATSAPP — ERRO NO ENVIO\n` +
+        `   Para: ${to}\n` +
+        `   Erro: ${result.error}`,
+      );
+    }
+  }
 
   /**
    * Process incoming WhatsApp message

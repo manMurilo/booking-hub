@@ -25,5 +25,8 @@ Thumbs.db
 # Prisma
 prisma/migrations
 
+# WhatsApp authentication (Baileys session files)
+.whatsapp-auth/
+
 # Misc
 *.local
