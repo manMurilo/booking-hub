@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConversationStateService } from './conversation-state.service';
 import { ConversationFlowOrchestrator } from './conversation-flow.orchestrator';
+import { TrinksAvailabilityExecutor } from './trinks-availability-executor.service';
+import { TrinksModule } from '../../integrations/trinks/trinks.module';
 
 /**
  * Módulo de Gerenciamento de Estado de Conversa
@@ -15,7 +17,16 @@ import { ConversationFlowOrchestrator } from './conversation-flow.orchestrator';
  * - Determinar próximo passo do fluxo (orquestração)
  */
 @Module({
-  providers: [ConversationStateService, ConversationFlowOrchestrator],
-  exports: [ConversationStateService, ConversationFlowOrchestrator],
+  imports: [TrinksModule],
+  providers: [
+    ConversationStateService,
+    ConversationFlowOrchestrator,
+    TrinksAvailabilityExecutor,
+  ],
+  exports: [
+    ConversationStateService,
+    ConversationFlowOrchestrator,
+    TrinksAvailabilityExecutor,
+  ],
 })
 export class ConversationStateModule {}

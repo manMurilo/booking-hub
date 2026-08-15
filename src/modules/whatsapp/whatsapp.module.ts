@@ -6,6 +6,7 @@ import { BookingModule } from '../booking/booking.module';
 import { ConversationStateModule } from '../conversation-state/conversation-state.module';
 import { BaileysConnectionService } from '../../integrations/whatsapp/baileys-connection.service';
 import { WhatsAppMessageAdapterService } from '../../integrations/whatsapp/whatsapp-message-adapter.service';
+import { TrinksAvailabilityExecutor } from '../conversation-state/trinks-availability-executor.service';
 
 /**
  * WhatsApp Module
@@ -19,6 +20,7 @@ import { WhatsAppMessageAdapterService } from '../../integrations/whatsapp/whats
     WhatsAppService,
     BaileysConnectionService,
     WhatsAppMessageAdapterService,
+    TrinksAvailabilityExecutor,
   ],
   exports: [WhatsAppService],
 })

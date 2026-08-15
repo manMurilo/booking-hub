@@ -9,13 +9,16 @@ import { BookingService } from '../booking/booking.service';
 import { ConversationStateService } from '../conversation-state/conversation-state.service';
 import { ConversationFlowOrchestrator } from '../conversation-state/conversation-flow.orchestrator';
 import { WhatsAppMessage, ProcessMessageResult } from './whatsapp.types';
+import { ConversationStage } from '../conversation-state/conversation-state.types';
 import {
-  ConversationStage,
-} from '../conversation-state/conversation-state.types';
-import { PendingAction, FlowDecision, ConversationContext } from '../conversation-state/conversation-flow.types';
+  PendingAction,
+  FlowDecision,
+  ConversationContext,
+} from '../conversation-state/conversation-flow.types';
 import { BaileysConnectionService } from '../../integrations/whatsapp/baileys-connection.service';
 import { WhatsAppMessageAdapterService } from '../../integrations/whatsapp/whatsapp-message-adapter.service';
 import { WhatsAppIncomingMessage } from '../../integrations/whatsapp/whatsapp-integration.types';
+import { TrinksAvailabilityExecutor } from '../conversation-state/trinks-availability-executor.service';
 
 type PendingConversationBatch = {
   conversationId: string;
@@ -49,6 +52,7 @@ export class WhatsAppService implements OnModuleInit {
     private bookingService: BookingService,
     private conversationStateService: ConversationStateService,
     private conversationFlowOrchestrator: ConversationFlowOrchestrator,
+    private trinksAvailabilityExecutor: TrinksAvailabilityExecutor,
     private baileysConnectionService: BaileysConnectionService,
     private messageAdapterService: WhatsAppMessageAdapterService,
   ) {}
@@ -57,7 +61,7 @@ export class WhatsAppService implements OnModuleInit {
    * Inicializar serviço ao carregar o módulo
    * Registra handlers para recebimento de mensagens do Baileys
    */
-  async onModuleInit(): Promise<void> {
+  onModuleInit(): void {
     this.logger.log('[WhatsApp Service] Inicializando...');
 
     // Registrar handler para recebimento de mensagens
@@ -110,7 +114,7 @@ export class WhatsAppService implements OnModuleInit {
         try {
           const errorMessage = `Desculpe, ocorreu um erro ao processar sua mensagem. Tente novamente mais tarde.`;
           await this.sendResponseViaBaileys(baileysMessage.jid, errorMessage);
-        } catch (sendError) {
+        } catch {
           this.logger.error(
             `❌ WHATSAPP — ERRO AO ENVIAR MENSAGEM DE ERRO\n` +
               `   Para: ${baileysMessage.jid}`,
@@ -161,9 +165,7 @@ export class WhatsAppService implements OnModuleInit {
    * @param message - WhatsApp message
    * @returns Response to send back
    */
-  async processMessage(
-    message: WhatsAppMessage,
-  ): Promise<ProcessMessageResult> {
+  processMessage(message: WhatsAppMessage): ProcessMessageResult {
     if (!message.from || !message.text) {
       throw new BadRequestException('Invalid message: missing from or text');
     }
@@ -265,10 +267,9 @@ export class WhatsAppService implements OnModuleInit {
         this.logger.log(
           `[WhatsApp] DEBOUNCE RESET\n   Conversa: ${current.conversationId}\n   Mensagens pendentes: ${current.messages.length}`,
         );
-        return;
+      } else {
+        this.pendingConversations.delete(conversationKey);
       }
-
-      this.pendingConversations.delete(conversationKey);
     }
   }
 
@@ -277,10 +278,8 @@ export class WhatsAppService implements OnModuleInit {
     batch: WhatsAppMessage[],
     jid?: string,
   ): Promise<ProcessMessageResult> {
-    const conversation =
-      this.conversationStateService.getConversation(conversationId);
     const state =
-      conversation ??
+      this.conversationStateService.getConversation(conversationId) ??
       this.conversationStateService.getOrCreateConversation(
         conversationId.replace(/_\d+$/, ''),
       );
@@ -309,18 +308,25 @@ export class WhatsAppService implements OnModuleInit {
       `[FlowOrchestrator] DECISÃO\n   Conversa: ${state.conversationId}\n   Próximo step: ${flowDecision.nextStep}\n   Ação: ${flowDecision.action}`,
     );
 
-    // Processar a decisão do orchestrator
-    const responseText = this.processFlowDecision(
+    // Processar a decisão do orchestrator e executar operações Trinks quando necessário
+    const nextContext = await this.processFlowDecision(
       state.conversationId,
       flowDecision,
+      conversationContext,
     );
 
+    const responseText = nextContext.responseText;
+
     // Atualizar estado da conversa a partir do contexto processado
-    conversationContext.step = flowDecision.nextStep;
-    conversationContext.pendingAction = flowDecision.action;
+    const updatedContext = {
+      ...conversationContext,
+      ...nextContext.context,
+      step: nextContext.context.step,
+      pendingAction: nextContext.context.pendingAction,
+    };
     this.conversationStateService.updateFromConversationContext(
       state.conversationId,
-      conversationContext,
+      updatedContext,
     );
 
     // Adicionar resposta ao histórico
@@ -366,57 +372,121 @@ export class WhatsAppService implements OnModuleInit {
    * @param decision - Decisão do orquestrador
    * @returns Mensagem a enviar ao usuário
    */
-  private processFlowDecision(
+  private async processFlowDecision(
     conversationId: string,
     decision: FlowDecision,
-  ): string {
+    context: ConversationContext,
+  ): Promise<{ responseText: string; context: ConversationContext }> {
     const { action, messageToUser } = decision;
 
     switch (action) {
       case PendingAction.ASK_USER:
-        // Fazer pergunta ao usuário
-        return messageToUser || 'Como posso te ajudar?';
+        return {
+          responseText: messageToUser || 'Como posso te ajudar?',
+          context: {
+            ...context,
+            step: decision.nextStep,
+            pendingAction: action,
+          },
+        };
 
       case PendingAction.WAIT_USER_RESPONSE:
-        // Apenas aguardar resposta, não enviar nada
-        return '';
+        return {
+          responseText: '',
+          context: {
+            ...context,
+            step: decision.nextStep,
+            pendingAction: action,
+          },
+        };
 
       case PendingAction.CONFIRM:
-        // Pedir confirmação
-        return messageToUser || 'Confirme os dados, por favor.';
+        return {
+          responseText: messageToUser || 'Confirme os dados, por favor.',
+          context: {
+            ...context,
+            step: decision.nextStep,
+            pendingAction: action,
+          },
+        };
 
       case PendingAction.HANDOVER:
-        // Encaminhar para atendente
         this.conversationStateService.markForHumanHandover(conversationId);
-        return messageToUser || 'Vou conectar você com uma atendente.';
+        return {
+          responseText: messageToUser || 'Vou conectar você com uma atendente.',
+          context: {
+            ...context,
+            step: decision.nextStep,
+            pendingAction: action,
+          },
+        };
 
       case PendingAction.FINISH:
-        // Finalizar conversa
-        return messageToUser || 'Conversa finalizada. Obrigado!';
+        return {
+          responseText: messageToUser || 'Conversa finalizada. Obrigado!',
+          context: {
+            ...context,
+            step: decision.nextStep,
+            pendingAction: action,
+          },
+        };
 
-      case PendingAction.CONSULT_TRINKS:
-        // Operação Trinks será implementada na próxima etapa
+      case PendingAction.CONSULT_TRINKS: {
+        const operation = decision.trinksOperation?.operation;
         this.logger.log(
-          `[FlowOrchestrator] Operação Trinks identificada: ${decision.trinksOperation?.operation}`,
+          `[FlowOrchestrator] Operação Trinks identificada: ${operation}`,
         );
-        return (
-          messageToUser || 'Consultando informações... Um momento, por favor.'
-        );
+
+        if (operation === 'GET_AVAILABILITY') {
+          const availabilityResult =
+            await this.trinksAvailabilityExecutor.executeAvailability(
+              context,
+              decision.trinksOperation?.params ?? {},
+            );
+
+          return {
+            responseText: availabilityResult.responseText,
+            context: availabilityResult.context,
+          };
+        }
+
+        return {
+          responseText:
+            messageToUser ||
+            'Consultando informações... Um momento, por favor.',
+          context: {
+            ...context,
+            step: decision.nextStep,
+            pendingAction: action,
+          },
+        };
+      }
 
       case PendingAction.EXECUTE_TRINKS_ACTION:
-        // Ação Trinks será implementada na próxima etapa
         this.logger.log(
           `[FlowOrchestrator] Ação Trinks identificada: ${decision.trinksOperation?.operation}`,
         );
-        return (
-          messageToUser ||
-          'Processando sua solicitação... Um momento, por favor.'
-        );
+        return {
+          responseText:
+            messageToUser ||
+            'Processando sua solicitação... Um momento, por favor.',
+          context: {
+            ...context,
+            step: decision.nextStep,
+            pendingAction: action,
+          },
+        };
 
       case PendingAction.NONE:
       default:
-        // Sem ação definida
-        return messageToUser || 'Pronto. Qual é o próximo passo?';
+        return {
+          responseText: messageToUser || 'Pronto. Qual é o próximo passo?',
+          context: {
+            ...context,
+            step: decision.nextStep,
+            pendingAction: action,
+          },
+        };
     }
   }
 
@@ -450,7 +520,6 @@ export class WhatsAppService implements OnModuleInit {
   private determineNextAction(
     userMessage: string,
     aiResponse: string,
-    conversation: any,
   ): 'continue' | 'escalate' | 'complete' {
     const messageLower = userMessage.toLowerCase();
 
