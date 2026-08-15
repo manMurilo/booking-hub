@@ -1,278 +1,115 @@
 # Integração Trinks — Agendamentos
 
-Esta documentação registra o comportamento conhecido da integração do Booking Hub com os recursos de agendamento da API Trinks.
+**Atualizado em:** 14/08/2026
 
-## Contexto atual do sistema
+Este documento registra apenas o comportamento conhecido e relevante da integração de agendamentos do Booking Hub com a API da Trinks.
 
-O fluxo de agendamento da aplicação continua sendo uma integração direta com a Trinks, sem camada local de persistência e sem regras de negócio próprias. O backend atua como fachada da API externa e expõe endpoints controlados por `src/integrations/trinks`.
+## 1. Configuração
 
-Para uma visão mais ampla da arquitetura atual do projeto, consulte o documento [contexto-geral-da-aplicacao.md](./contexto-geral-da-aplicacao.md) e o [README.md](../README.md).
+A integração utiliza:
 
-## Visão geral da implementação atual
-
-O Booking Hub expõe dois grupos de rotas para agendamento:
-
-### 1) Proxy Trinks já implementado
-
-- `GET /api/v1/trinks/agendamentos`
-- `GET /api/v1/trinks/agenda`
-- `GET /api/v1/trinks/agendamentos/profissionais`
-- `GET /api/v1/trinks/disponibilidade`
-- `POST /api/v1/trinks/agendamentos`
-- `PUT /api/v1/trinks/agendamentos/:id`
-- `PATCH /api/v1/trinks/agendamentos/:agendamentoId/status/cancelado`
-- `POST /api/v1/trinks/agendamentos/prepare`
-
-### 2) Fluxo de negócio local ainda não implementado
-
-- criação local completa de agendamento com regras do Booking Hub
-- persistência local de agendamentos
-- confirmação/cancelamento com regras próprias do sistema
-- modelagem de domínio local do agendamento
-
-Nesse momento, o backend já aplica uma camada mínima de validação local antes de encaminhar a criação para a Trinks: verifica cliente, serviço, profissional e disponibilidade básica do profissional para o horário solicitado.
-
-## Configuração
-
-A integração utiliza as seguintes variáveis de ambiente:
-
-- `TRINKS_API_KEY` — chave de autenticação enviada em `X-Api-Key`
-- `TRINKS_ESTABELECIMENTO_ID` — identificador do estabelecimento usado pela integração
-- `TRINKS_BASE_URL` — base URL da API Trinks
-
-O estabelecimento utilizado atualmente no MVP é:
-
-- Nome: Crazy Dog Barber
-- ID: `232903`
-
-> Nunca registrar a API Key real na documentação ou no repositório.
-
-## Autenticação
-
-A API Trinks usa autenticação por cabeçalho:
-
+```env
+TRINKS_API_KEY=...
+TRINKS_BASE_URL=...
+TRINKS_ESTABELECIMENTO_ID=232903
 ```
+
+Headers enviados à Trinks:
+
+```http
 X-Api-Key: <TRINKS_API_KEY>
+estabelecimentoId: <TRINKS_ESTABELECIMENTO_ID>
 ```
 
-No Booking Hub, o `estabelecimentoId` sempre deve vir da variável de ambiente `TRINKS_ESTABELECIMENTO_ID` e não deve ser fornecido pelo usuário.
+O estabelecimento utilizado no MVP é:
 
-## 1. Proxy: listar agendamentos
-
-Endpoint:
-
+```text
+232903 — Crazy Dog Barber
 ```
+
+O `estabelecimentoId` vem da configuração do servidor e não deve ser fornecido pelo usuário.
+
+## 2. Listar agendamentos
+
+API Trinks:
+
+```http
 GET /v1/agendamentos
 ```
 
-Parâmetros:
+A integração interna expõe:
+
+```http
+GET /api/v1/trinks/agendamentos
+```
+
+Parâmetros suportados atualmente:
 
 - `page`
 - `pageSize`
 - `clienteId`
 - `dataInicio`
 - `dataFim`
-- `estabelecimentoId` (obrigatório)
 
-Notas:
+A resposta da Trinks é paginada. O Booking Hub não percorre automaticamente todas as páginas.
 
-- `estabelecimentoId` é obrigatório.
-- No Booking Hub, este valor deve ser preenchido internamente a partir de `TRINKS_ESTABELECIMENTO_ID`.
-- A resposta possui paginação.
-- Atualmente, o Booking Hub não busca automaticamente todas as páginas.
+### Datas
 
-## 2. Proxy: criar agendamento
+O serviço normaliza datas informadas no formato brasileiro para o formato ISO usado pela consulta da Trinks.
 
-Endpoint:
+Exemplo:
 
-```
-POST /v1/agendamentos
+```text
+12/08/2026
+→ dataInicio=2026-08-12T00:00:00
+→ dataFim=2026-08-12T23:59:59
 ```
 
-Body esperado:
+### Estrutura conhecida
+
+Um agendamento retornado pela Trinks possui, entre outros:
 
 ```json
 {
-  "servicoId": 0,
-  "clienteId": 0,
-  "profissionalId": 0,
-  "dataHoraInicio": "2026-01-01T00:00:00",
-  "duracaoEmMinutos": 0,
-  "valor": 0,
-  "observacoes": null,
-  "confirmado": false
+  "id": 519508283,
+  "status": {
+    "id": 4,
+    "nome": "Confirmado"
+  },
+  "cliente": {
+    "id": 80726709,
+    "nome": "Francisco vinicius mata"
+  },
+  "servico": {
+    "id": 13669508,
+    "nome": "Corte"
+  },
+  "profissional": {
+    "id": 781497,
+    "nome": "tailan de jesus dos santos"
+  },
+  "dataHoraInicio": "2026-08-12T19:00:00",
+  "duracaoEmMinutos": 40,
+  "valor": 45
 }
 ```
 
-Parâmetros obrigatórios:
+## 3. Agenda de profissionais
 
-- `servicoId`
-- `clienteId`
-- `dataHoraInicio`
-- `duracaoEmMinutos`
-- `valor`
-- `estabelecimentoId`
+Recurso da Trinks utilizado pelo projeto:
 
-Observações:
-
-- `profissionalId` e `observacoes` podem ser nulos.
-- Este endpoint já existe no backend e encaminha a chamada para a Trinks.
-- O fluxo de negócio local do Booking Hub continua pendente.
-
-## 3. Obter agendamento (documentado pela API Trinks)
-
-Recurso:
-
-- Obter um agendamento específico por `id`
-
-Parâmetros:
-
-- `id`
-- `estabelecimentoId`
-
-Notas:
-
-- Este recurso está documentado, mas ainda não faz parte do fluxo principal implementado do Booking Hub.
-
-## 4. Configurações de agendamento (documentado pela API Trinks)
-
-Endpoint:
-
-```
-GET /v1/agendamentos/configuracoes
+```http
+GET /v1/agendamentos/profissionais/{data}
 ```
 
-Parâmetro obrigatório:
+A integração interna expõe o mesmo recurso por:
 
-- `estabelecimentoId`
-
-Notas:
-
-- Este recurso está documentado pela API Trinks, mas ainda não foi integrado ao fluxo do Booking Hub.
-
-## 5. Proxy: editar agendamento
-
-Endpoint:
-
-```
-PUT /v1/agendamentos/{id}
-```
-
-Body esperado:
-
-- `servicoId`
-- `clienteId`
-- `profissionalId`
-- `dataHoraInicio`
-- `duracaoEmMinutos`
-- `valor`
-- `observacoes`
-
-Notas:
-
-- Este endpoint já foi exposto pelo backend e repassa a alteração para a Trinks.
-- A regra de negócio local ainda não foi adicionada ao Booking Hub.
-
-## 6. Confirmar agendamento (ainda não implementado localmente)
-
-Endpoint:
-
-```
-PATCH /v1/agendamentos/{agendamentoId}/status/confirmado
-```
-
-Parâmetros:
-
-- `agendamentoId`
-- `estabelecimentoId`
-
-Notas:
-
-- Esta ação ainda não está implementada no fluxo principal do Booking Hub.
-
-## 7. Proxy: cancelar agendamento
-
-Endpoint:
-
-```
-PATCH /v1/agendamentos/{agendamentoId}/status/cancelado
-```
-
-Body esperado:
-
-```json
-{
-  "quemCancelou": 0,
-  "motivo": "Motivo do cancelamento"
-}
-```
-
-Parâmetros:
-
-- `agendamentoId`
-- `estabelecimentoId`
-
-Notas:
-
-- Este endpoint já existe e encaminha a operação para a Trinks.
-- O cancelamento com regras de negócio locais do Booking Hub ainda não foi implementado.
-
-## 8. Helper de preparação do payload
-
-Endpoint:
-
-```
-POST /api/v1/trinks/agendamentos/prepare
-```
-
-Descrição:
-
-- prepara o payload para a requisição de criação de agendamento
-- centraliza a montagem do corpo usado pela API Trinks
-- não representa a regra de negócio local do Booking Hub
-- é um helper de integração, não um fluxo de agendamento do produto
-
-## 9. Profissionais com agenda
-
-Este é o recurso mais importante para a próxima etapa do MVP.
-
-Endpoint real confirmado:
-
-```
-GET https://api.trinks.com/v1/agendamentos/profissionais/{data}
-```
-
-Descrição do recurso:
-
-- Lista os profissionais com agenda do estabelecimento.
-
-Parâmetros disponíveis:
-
-- `data` (obrigatório, em path)
-- `intervalos`
-- `servicoId`
-- `servicoDuracao`
-- `profissionalId`
-- `page`
-- `excluirExcecoesDeAgendamentoOnline`
-- `estabelecimentoId` (obrigatório, via header)
-
-Notas:
-
-- `data` é obrigatório como parte do caminho da URL.
-- `estabelecimentoId` é obrigatório e deve ser enviado como header a partir de `TRINKS_ESTABELECIMENTO_ID`.
-- O serviço envia para a Trinks apenas os parâmetros opcionais que forem informados.
-- A resposta da Trinks é atualmente retornada sem transformação adicional pelo Booking Hub.
-
-### Endpoint interno do Booking Hub
-
-Endpoint exposto internamente:
-
-```
+```http
 GET /api/v1/trinks/agenda
+GET /api/v1/trinks/agendamentos/profissionais
 ```
 
-Parâmetros aceitos internamente:
+Parâmetros suportados pelo controller:
 
 - `data`
 - `servicoId`
@@ -282,95 +119,192 @@ Parâmetros aceitos internamente:
 - `page`
 - `excluirExcecoesDeAgendamentoOnline`
 
-Notas:
+A resposta é retornada sem transformação estrutural adicional na camada de integração.
 
-- O Booking Hub encaminha apenas os parâmetros opcionais informados.
-- A resposta de agenda é retornada sem transformação adicional.
+Exemplo conhecido:
 
-### Exemplo de consulta testada
-
-```
-GET /api/v1/trinks/agenda?data=2026-08-12&servicoDuracao=60
-```
-
-Resultado conhecido:
-
-- HTTP `200`
-- Retornou uma lista vazia com paginação padrão.
-
-Importante:
-
-- Este resultado não é suficiente para concluir que não existem horários disponíveis.
-
-### Dados reais conhecidos para testes
-
-Agendamento real identificado no estabelecimento:
-
-- Agendamento: `518142634`
-- Serviço: `13641157`
-- Profissional: `781497`
-- Data: `2026-10-24`
-- Horário: `15:30`
-- Duração: `60` minutos
-- Status: Confirmado
-
-Exemplos de consulta para testes:
-
-```
-GET /api/v1/trinks/agenda?data=2026-10-24&servicoId=13641157&servicoDuracao=60
+```json
+{
+  "id": 781473,
+  "nome": "Danilo alves",
+  "horariosVagos": [
+    "14:00",
+    "14:30",
+    "15:00"
+  ],
+  "intervalosVagos": [
+    {
+      "inicio": "14:00",
+      "fim": "17:30"
+    }
+  ]
+}
 ```
 
-```
-GET /api/v1/trinks/agenda?data=2026-10-24&servicoId=13641157&servicoDuracao=60&profissionalId=781497
-```
+Esse recurso é a principal fonte de disponibilidade utilizada pela camada Booking.
 
-### Pontos de investigação futuros
+## 4. Disponibilidade
 
-Ainda precisamos confirmar:
+O Booking Hub possui:
 
-1. formato da resposta;
-2. significado de `intervalos`;
-3. comportamento de `servicoId`;
-4. comportamento de `servicoDuracao`;
-5. comportamento de `profissionalId`;
-6. como a Trinks representa os horários disponíveis;
-7. se o recurso já resolve a disponibilidade ou se será necessário cruzar seus dados com os agendamentos existentes.
-
-## Limites conhecidos da API
-
-A API Trinks tem os seguintes limites conhecidos:
-
-- `60` requisições por minuto
-- `5.000` requisições por mês
-
-Quando o limite é excedido, a API retorna:
-
-```
-HTTP 429
+```http
+GET /api/v1/trinks/disponibilidade
 ```
 
-Notas:
+`data` é obrigatório.
 
-- No momento, o Booking Hub não possui retry automático nem rate limiter complexo.
-- Não implementar esses mecanismos apenas por causa desta documentação.
+Os demais filtros são os mesmos utilizados pela consulta de agenda.
 
-## Estado atual da integração
+Também existe uma camada Booking que transforma os `horariosVagos` em slots:
+
+```text
+GET /api/v1/api/booking/agenda/disponivel
+```
+
+> A rota acima contém atualmente a duplicação `api/v1/api` causada pelo decorator do controller e pelo prefixo global. Essa inconsistência ainda precisa ser corrigida.
+
+## 5. Criação de agendamento
+
+API Trinks:
+
+```http
+POST /v1/agendamentos
+```
+
+Endpoint atual do Booking Hub:
+
+```http
+POST /api/v1/trinks/agendamentos
+```
+
+Payload utilizado:
+
+```json
+{
+  "servicoId": 0,
+  "clienteId": 0,
+  "profissionalId": null,
+  "dataHoraInicio": "2026-01-01T00:00:00",
+  "duracaoEmMinutos": 0,
+  "valor": 0,
+  "observacoes": null,
+  "confirmado": false
+}
+```
+
+A integração valida os tipos básicos, prepara o request e encaminha para a Trinks.
+
+Também existe:
+
+```http
+POST /api/v1/trinks/agendamentos/prepare
+```
+
+Esse endpoint é apenas um helper para preparar o payload; não representa o fluxo de negócio completo do Booking Hub.
+
+## 6. Edição de agendamento
+
+Endpoint interno:
+
+```http
+PUT /api/v1/trinks/agendamentos/:id
+```
+
+A operação encaminha a edição para a Trinks.
+
+Ela ainda não está protegida por um fluxo de negócio completo do produto.
+
+## 7. Cancelamento
+
+Endpoint interno:
+
+```http
+PATCH /api/v1/trinks/agendamentos/:agendamentoId/status/cancelado
+```
+
+Payload aceito pela integração:
+
+```json
+{
+  "quemCancelou": 0,
+  "motivo": "Motivo do cancelamento"
+}
+```
+
+O endpoint encaminha a operação para a Trinks.
+
+Ainda não existe um fluxo conversacional de cancelamento implementado no Booking Hub.
+
+## 8. Confirmação
+
+O código atual não possui uma rota interna dedicada para:
+
+```http
+PATCH /v1/agendamentos/{agendamentoId}/status/confirmado
+```
+
+Portanto, não considerar confirmação como funcionalidade implementada no Booking Hub.
+
+## 9. Dados reais conhecidos para validação
+
+Foi identificado no estabelecimento um agendamento real com:
+
+```text
+Agendamento: 518142634
+Serviço:     13641157
+Profissional: 781497
+Data:        2026-10-24
+Horário:     15:30
+Duração:     60 minutos
+Status:      Confirmado
+Valor:       90
+```
+
+Esses dados podem ser usados como referência para testes controlados de leitura.
+
+## 10. Limites da API Trinks
+
+Limites conhecidos:
+
+```text
+60 requisições/minuto
+5.000 requisições/mês
+```
+
+Excesso pode retornar:
+
+```http
+429 Too Many Requests
+```
+
+O projeto não implementa retry automático nem rate limiter complexo neste momento.
+
+## 11. Estado atual
 
 ### Implementado
 
-- autenticação com API Key
-- configuração do estabelecimento
-- consulta de agendamentos
-- consulta de profissionais com agenda
-- endpoint interno `/api/v1/trinks/agenda`
+- autenticação por API Key;
+- `estabelecimentoId` configurado por ambiente;
+- consulta de agendamentos;
+- filtros de período e cliente;
+- paginação;
+- normalização de datas;
+- consulta de agenda por profissional/data;
+- consulta de disponibilidade;
+- criação de agendamento como integração;
+- edição de agendamento como integração;
+- cancelamento como integração;
+- preparação de payload de criação.
 
-### Ainda não implementado
+### Ainda não implementado como produto
 
-- criação de agendamento
-- edição de agendamento
-- confirmação de agendamento
-- cancelamento de agendamento
-- regras de disponibilidade
-- IA
-- WhatsApp
-- persistência em banco
+- fluxo completo de agendamento orientado por conversa;
+- confirmação conversacional;
+- cancelamento conversacional;
+- reagendamento conversacional;
+- regras de negócio completas independentes da Trinks;
+- persistência local.
+
+## 12. Próximo foco
+
+A prioridade é consolidar as operações de clientes e agendamentos na camada Booking e validar cada operação contra a API real antes de avançar para automação conversacional completa.
