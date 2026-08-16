@@ -14,6 +14,7 @@ import {
   PendingAction,
   FlowDecision,
   ConversationContext,
+  ConversationStep,
 } from '../conversation-state/conversation-flow.types';
 import { BaileysConnectionService } from '../../integrations/whatsapp/baileys-connection.service';
 import { WhatsAppMessageAdapterService } from '../../integrations/whatsapp/whatsapp-message-adapter.service';
@@ -327,6 +328,9 @@ export class WhatsAppService implements OnModuleInit {
         );
     }
 
+    conversationContext =
+      await this.resolveBookingReferences(conversationContext);
+
     // Chamar orchestrator para determinar próximo passo
     const flowDecision =
       this.conversationFlowOrchestrator.determineNextStep(conversationContext);
@@ -477,9 +481,17 @@ export class WhatsAppService implements OnModuleInit {
           };
         }
 
-        // Se houver messageToUser, usar. Caso contrário, usar message vazia ou padrão seguro
+        if (operation === 'GET_CLIENT') {
+          return this.executeGetClient(
+            context,
+            decision.trinksOperation?.params ?? {},
+          );
+        }
+
         return {
-          responseText: messageToUser || '',
+          responseText:
+            messageToUser ||
+            'Não consegui consultar os dados necessários agora.',
           context: {
             ...context,
             step: decision.nextStep,
@@ -488,10 +500,40 @@ export class WhatsAppService implements OnModuleInit {
         };
       }
 
-      case PendingAction.EXECUTE_TRINKS_ACTION:
+      case PendingAction.EXECUTE_TRINKS_ACTION: {
+        const operation = decision.trinksOperation?.operation;
         this.logger.log(
-          `[FlowOrchestrator] Ação Trinks identificada: ${decision.trinksOperation?.operation}`,
+          `[FlowOrchestrator] Ação Trinks identificada: ${operation}`,
         );
+
+        if (operation === 'CREATE_CLIENT') {
+          try {
+            return await this.executeCreateClient(
+              context,
+              decision.trinksOperation?.params ?? {},
+            );
+          } catch (error) {
+            const errorMessage =
+              error instanceof Error ? error.message : 'Erro desconhecido';
+            this.logger.error(
+              `[FlowOrchestrator] Falha ao criar cliente: ${errorMessage}`,
+            );
+            return {
+              responseText:
+                'Não consegui concluir seu cadastro agora. Confira o nome e o CPF e tente novamente.',
+              context: {
+                ...context,
+                step: ConversationStep.CLIENT_REGISTRATION,
+                pendingAction: PendingAction.ASK_USER,
+              },
+            };
+          }
+        }
+
+        if (operation === 'CREATE_BOOKING') {
+          return this.executeCreateBooking(context);
+        }
+
         return {
           responseText:
             messageToUser ||
@@ -502,6 +544,7 @@ export class WhatsAppService implements OnModuleInit {
             pendingAction: action,
           },
         };
+      }
 
       case PendingAction.NONE:
       default:
@@ -516,8 +559,287 @@ export class WhatsAppService implements OnModuleInit {
     }
   }
 
+  private async resolveBookingReferences(
+    context: ConversationContext,
+  ): Promise<ConversationContext> {
+    if (!context.booking) {
+      return context;
+    }
+
+    const booking = { ...context.booking };
+
+    try {
+      if (!booking.serviceId && booking.serviceName) {
+        const service = await this.bookingService.resolveServiceByName(
+          booking.serviceName,
+        );
+        if (service) {
+          booking.serviceId = service.servicoId;
+          booking.serviceName = service.nome;
+        }
+      }
+
+      if (!booking.professionalId && booking.professionalName) {
+        const professional =
+          await this.bookingService.resolveProfessionalByName(
+            booking.professionalName,
+          );
+        if (professional) {
+          booking.professionalId = professional.profissionalId;
+          booking.professionalName = professional.nome;
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(
+        `[FlowOrchestrator] Não foi possível resolver referências do booking: ${message}`,
+      );
+    }
+
+    return { ...context, booking };
+  }
+
+  private async continueAfterClientIdentification(
+    context: ConversationContext,
+    greeting: string,
+  ): Promise<{ responseText: string; context: ConversationContext }> {
+    if (context.intent !== 'booking') {
+      return {
+        responseText: greeting,
+        context: {
+          ...context,
+          step: ConversationStep.HANDOVER_TO_HUMAN,
+          pendingAction: PendingAction.HANDOVER,
+        },
+      };
+    }
+
+    if (!context.booking?.serviceId) {
+      return {
+        responseText: `${greeting} Qual serviço você gostaria de agendar?`,
+        context: {
+          ...context,
+          step: ConversationStep.BOOKING_SERVICE_SELECTION,
+          pendingAction: PendingAction.ASK_USER,
+        },
+      };
+    }
+
+    if (!context.booking.appointmentDate) {
+      return {
+        responseText: `${greeting} Qual data você prefere?`,
+        context: {
+          ...context,
+          step: ConversationStep.BOOKING_DATE_SELECTION,
+          pendingAction: PendingAction.ASK_USER,
+        },
+      };
+    }
+
+    const availabilityResult =
+      await this.trinksAvailabilityExecutor.executeAvailability(context, {
+        date: context.booking.appointmentDate,
+        serviceId: context.booking.serviceId,
+        professionalId: context.booking.professionalId,
+      });
+
+    return {
+      responseText: `${greeting}\n\n${availabilityResult.responseText}`,
+      context: availabilityResult.context,
+    };
+  }
+
+  private async executeGetClient(
+    context: ConversationContext,
+    params: Record<string, any>,
+  ): Promise<{ responseText: string; context: ConversationContext }> {
+    const result = params.cpf
+      ? await this.bookingService.findClienteByCpf(String(params.cpf))
+      : await this.bookingService.findClienteByPhoneNumber(
+          String(params.phone ?? context.phoneNumber),
+        );
+
+    if (result.found && result.cliente) {
+      const client = result.cliente;
+      const identifiedContext: ConversationContext = {
+        ...context,
+        client: {
+          ...context.client,
+          identified: true,
+          id: client.clienteId,
+          name: client.nome,
+          firstName: client.primeiroNome,
+          cpf: client.cpf || context.client.cpf,
+          phone: client.telefone || context.phoneNumber,
+          foundInDatabase: true,
+          isNewClient: false,
+          waitingForRegistration: false,
+          pendingName: false,
+          pendingCPF: false,
+        },
+        metadata: {
+          ...context.metadata,
+          identificationByCpf: false,
+        },
+      };
+
+      return this.continueAfterClientIdentification(
+        identifiedContext,
+        `Olá, ${client.primeiroNome}!`,
+      );
+    }
+
+    const isCpfLookup = Boolean(params.cpf);
+    return {
+      responseText: isCpfLookup
+        ? 'Não encontrei um cadastro com esse CPF. Para cadastrar você, informe seu nome completo.'
+        : 'Você já é cliente da Crazy Dog Barber?',
+      context: {
+        ...context,
+        step: isCpfLookup
+          ? ConversationStep.CLIENT_REGISTRATION
+          : ConversationStep.CLIENT_IDENTIFICATION,
+        pendingAction: PendingAction.ASK_USER,
+        client: {
+          ...context.client,
+          identified: false,
+          foundInDatabase: false,
+          isNewClient: isCpfLookup ? true : context.client.isNewClient,
+          waitingForRegistration: isCpfLookup
+            ? true
+            : context.client.waitingForRegistration,
+          pendingName: isCpfLookup ? true : context.client.pendingName,
+          pendingCPF: isCpfLookup ? false : context.client.pendingCPF,
+        },
+        metadata: {
+          ...context.metadata,
+          identificationByCpf: false,
+        },
+      },
+    };
+  }
+
+  private async executeCreateClient(
+    context: ConversationContext,
+    params: Record<string, any>,
+  ): Promise<{ responseText: string; context: ConversationContext }> {
+    const client = await this.bookingService.registerCliente({
+      nome: String(params.name ?? context.client.name ?? ''),
+      cpf: String(params.cpf ?? context.client.cpf ?? ''),
+      telefone: context.phoneNumber,
+    });
+
+    const identifiedContext: ConversationContext = {
+      ...context,
+      client: {
+        ...context.client,
+        identified: true,
+        id: client.clienteId,
+        name: client.nome,
+        firstName: client.primeiroNome,
+        cpf: client.cpf,
+        phone: client.telefone,
+        foundInDatabase: true,
+        isNewClient: false,
+        waitingForRegistration: false,
+        pendingName: false,
+        pendingCPF: false,
+      },
+      metadata: {
+        ...context.metadata,
+        identificationByCpf: false,
+      },
+    };
+
+    return this.continueAfterClientIdentification(
+      identifiedContext,
+      `Perfeito! Cadastro realizado, ${client.primeiroNome}!`,
+    );
+  }
+
+  private async executeCreateBooking(
+    context: ConversationContext,
+  ): Promise<{ responseText: string; context: ConversationContext }> {
+    const booking = context.booking;
+    if (
+      !booking ||
+      !context.client.id ||
+      !booking.serviceId ||
+      !booking.appointmentDate ||
+      !booking.appointmentTime
+    ) {
+      return {
+        responseText: 'Ainda faltam dados para concluir o agendamento.',
+        context: {
+          ...context,
+          step: ConversationStep.BOOKING_CONFIRMATION,
+          pendingAction: PendingAction.CONFIRM,
+        },
+      };
+    }
+
+    const dataHora = this.combineDateAndTime(
+      booking.appointmentDate,
+      booking.appointmentTime,
+    );
+
+    try {
+      const result = await this.bookingService.createAppointment({
+        clienteId: context.client.id,
+        servicoId: booking.serviceId,
+        profissionalId: booking.professionalId,
+        dataHora,
+      });
+
+      const appointmentId = Number(
+        result?.agendamento?.id ?? result?.agendamentoId ?? result?.id ?? 0,
+      );
+
+      return {
+        responseText: appointmentId
+          ? `Agendamento confirmado com sucesso! Seu número é ${appointmentId}.`
+          : 'Agendamento confirmado com sucesso!',
+        context: {
+          ...context,
+          step: ConversationStep.COMPLETED,
+          pendingAction: PendingAction.FINISH,
+          booking: {
+            ...booking,
+            isConfirmed: true,
+            confirmedAt: new Date(),
+            appointmentId: appointmentId || undefined,
+          },
+        },
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(
+        `[FlowOrchestrator] Falha ao criar agendamento: ${message}`,
+      );
+      return {
+        responseText:
+          'Não consegui concluir o agendamento agora. Confirme novamente para eu tentar de novo.',
+        context: {
+          ...context,
+          step: ConversationStep.BOOKING_CONFIRMATION,
+          pendingAction: PendingAction.CONFIRM,
+          booking: { ...booking, isConfirmed: undefined },
+        },
+      };
+    }
+  }
+
+  private combineDateAndTime(date: Date, time: string): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const normalizedTime = /^\d{2}:\d{2}$/.test(time) ? time : `${time}:00`;
+    return `${year}-${month}-${day}T${normalizedTime}:00`;
+  }
+
   /**
    * Normalize phone number to consistent format
+
    * @param phone - Raw phone from WhatsApp
    * @returns Normalized phone
    */

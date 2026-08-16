@@ -386,7 +386,7 @@ export class AgendamentosService {
 
     try {
       await this.clientesService.getClientePorId(payload.clienteId);
-    } catch (error) {
+    } catch {
       throw new UnprocessableEntityException(
         'Cliente não encontrado na Trinks.',
       );
@@ -403,23 +403,26 @@ export class AgendamentosService {
     }
 
     if (
-      payload.profissionalId === undefined ||
-      payload.profissionalId === null ||
-      Number.isNaN(Number(payload.profissionalId))
+      payload.profissionalId !== undefined &&
+      payload.profissionalId !== null
     ) {
-      throw new UnprocessableEntityException(
-        'Profissional é obrigatório para o agendamento.',
-      );
-    }
+      if (Number.isNaN(Number(payload.profissionalId))) {
+        throw new UnprocessableEntityException(
+          'Profissional inválido para o agendamento.',
+        );
+      }
 
-    const profissionais = await this.profissionaisService.getProfissionais({});
-    const profissional = profissionais?.data?.find(
-      (item: any) => item.id === payload.profissionalId,
-    );
-    if (!profissional) {
-      throw new UnprocessableEntityException(
-        'Profissional não encontrado na Trinks.',
+      const profissionais = await this.profissionaisService.getProfissionais(
+        {},
       );
+      const profissional = profissionais?.data?.find(
+        (item: any) => item.id === payload.profissionalId,
+      );
+      if (!profissional) {
+        throw new UnprocessableEntityException(
+          'Profissional não encontrado na Trinks.',
+        );
+      }
     }
 
     const data = `${dataHoraInicio.getFullYear()}-${String(

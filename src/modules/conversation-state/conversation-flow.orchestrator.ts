@@ -47,9 +47,16 @@ export class ConversationFlowOrchestrator {
       return this.handleErrorRecovery();
     }
 
-    // Fluxo inicial - sem intenção definida
-    if (context.step === ConversationStep.INITIAL) {
+    // Fluxo inicial sem intenção definida; quando já há intenção, processá-la no mesmo turno.
+    if (
+      context.step === ConversationStep.INITIAL &&
+      context.intent === ConversationIntent.UNKNOWN
+    ) {
       return this.handleInitialStep();
+    }
+
+    if (context.step === ConversationStep.INITIAL) {
+      return this.handleIntentionStep(context);
     }
 
     // Fluxo de identificação de intenção
@@ -152,6 +159,10 @@ export class ConversationFlowOrchestrator {
           PendingAction.CONSULT_TRINKS,
           undefined,
           'Intenção BOOKING detectada. Cliente não identificado, consultando Trinks.',
+          {
+            operation: 'GET_CLIENT',
+            params: { phone: context.phoneNumber },
+          },
         );
       }
 
@@ -183,6 +194,10 @@ export class ConversationFlowOrchestrator {
           PendingAction.CONSULT_TRINKS,
           undefined,
           'Intenção SUPPORT detectada. Cliente não identificado, consultando Trinks.',
+          {
+            operation: 'GET_CLIENT',
+            params: { phone: context.phoneNumber },
+          },
         );
       }
 
@@ -213,7 +228,10 @@ export class ConversationFlowOrchestrator {
     // Se já identificado, avançar
     if (context.client.identified) {
       // Retomar o fluxo anterior
-      if (context.previousIntent === ConversationIntent.BOOKING) {
+      if (
+        context.intent === ConversationIntent.BOOKING ||
+        context.previousIntent === ConversationIntent.BOOKING
+      ) {
         return this.createDecision(
           ConversationStep.BOOKING_SERVICE_SELECTION,
           PendingAction.ASK_USER,
@@ -240,24 +258,52 @@ export class ConversationFlowOrchestrator {
       );
     }
 
+    if (
+      context.metadata?.identificationByCpf &&
+      context.client.cpf &&
+      !context.client.identified
+    ) {
+      return this.createDecision(
+        ConversationStep.CLIENT_IDENTIFICATION,
+        PendingAction.CONSULT_TRINKS,
+        undefined,
+        'Consultando Trinks pelo CPF informado.',
+        {
+          operation: 'GET_CLIENT',
+          params: { cpf: context.client.cpf },
+        },
+      );
+    }
+
     // Cliente não encontrado na Trinks
-    if (!context.client.foundInDatabase) {
-      // Perguntar se é cliente novo
-      if (!context.client.waitingForRegistration) {
+    if (
+      !context.client.foundInDatabase &&
+      !context.metadata?.identificationByCpf
+    ) {
+      if (context.client.isNewClient || context.client.waitingForRegistration) {
         return this.createDecision(
-          ConversationStep.CLIENT_IDENTIFICATION,
+          ConversationStep.CLIENT_REGISTRATION,
           PendingAction.ASK_USER,
-          'Você já é cliente da Crazy Dog Barber?',
-          'Cliente não encontrado em Trinks. Perguntando se é novo cliente.',
+          'Sem problema! Para dar continuidade ao agendamento, me passe seu nome completo e CPF, por favor.',
+          'Confirmado novo cliente. Iniciando registro.',
         );
       }
 
-      // Se respondeu que é novo, ir para registro
+      // Perguntar se é cliente novo
       return this.createDecision(
-        ConversationStep.CLIENT_REGISTRATION,
+        ConversationStep.CLIENT_IDENTIFICATION,
         PendingAction.ASK_USER,
-        'Sem problema! Para dar continuidade ao agendamento, me passe seu nome completo e CPF, por favor.',
-        'Confirmado novo cliente. Iniciando registro.',
+        'Você já é cliente da Crazy Dog Barber?',
+        'Cliente não encontrado em Trinks. Perguntando se é novo cliente.',
+      );
+    }
+
+    if (context.metadata?.identificationByCpf && !context.client.cpf) {
+      return this.createDecision(
+        ConversationStep.CLIENT_IDENTIFICATION,
+        PendingAction.ASK_USER,
+        'Pode me informar seu CPF para localizar seu cadastro?',
+        'Cliente informou que já é cliente; aguardando CPF.',
       );
     }
 
@@ -282,21 +328,21 @@ export class ConversationFlowOrchestrator {
     context: ConversationContext,
   ): FlowDecision {
     // Tem nome?
-    if (!context.client.name || context.client.pendingName) {
+    if (!context.client.name) {
       return this.createDecision(
         ConversationStep.CLIENT_REGISTRATION,
-        PendingAction.WAIT_USER_RESPONSE,
-        undefined,
+        PendingAction.ASK_USER,
+        'Qual é o seu nome completo?',
         'Aguardando nome do cliente.',
       );
     }
 
     // Tem CPF?
-    if (!context.client.cpf || context.client.pendingCPF) {
+    if (!context.client.cpf) {
       return this.createDecision(
         ConversationStep.CLIENT_REGISTRATION,
-        PendingAction.WAIT_USER_RESPONSE,
-        undefined,
+        PendingAction.ASK_USER,
+        'Qual é o seu CPF?',
         'Aguardando CPF do cliente.',
       );
     }
@@ -322,7 +368,10 @@ export class ConversationFlowOrchestrator {
     // Cliente criado com sucesso
     if (context.client.id && context.client.identified) {
       // Retomar fluxo anterior
-      if (context.previousIntent === ConversationIntent.BOOKING) {
+      if (
+        context.intent === ConversationIntent.BOOKING ||
+        context.previousIntent === ConversationIntent.BOOKING
+      ) {
         return this.createDecision(
           ConversationStep.BOOKING_SERVICE_SELECTION,
           PendingAction.ASK_USER,
@@ -407,6 +456,29 @@ export class ConversationFlowOrchestrator {
         reason: 'Horário não informado ainda.',
       };
       return decision;
+    }
+
+    if (context.metadata?.confirmationDeclined) {
+      return this.createDecision(
+        ConversationStep.BOOKING_SERVICE_SELECTION,
+        PendingAction.ASK_USER,
+        'Tudo bem. O que você gostaria de alterar no agendamento?',
+        'Cliente recusou a confirmação; aguardando novos dados.',
+      );
+    }
+
+    // Confirmação explícita recebida: executar a criação somente agora.
+    if (context.booking.isConfirmed === true) {
+      return this.createDecision(
+        ConversationStep.BOOKING_CONFIRMATION,
+        PendingAction.EXECUTE_TRINKS_ACTION,
+        undefined,
+        'Cliente confirmou o agendamento.',
+        {
+          operation: 'CREATE_BOOKING',
+          params: {},
+        },
+      );
     }
 
     // Todos os dados coletados, pedir confirmação

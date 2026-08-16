@@ -2,7 +2,7 @@
 
 Backend em NestJS que centraliza a integração do produto com a API da Trinks e possui uma camada inicial para consultas de booking, estado conversacional e processamento de mensagens via WhatsApp com Grok.
 
-> **Estado em 14/08/2026:** o projeto está em fase de fundação/MVP. A integração Trinks está avançada; os módulos de Booking, estado conversacional, IA e WhatsApp existem, mas o fluxo conversacional ainda é prototípico e não executa o ciclo completo de agendamento.
+> **Estado em 16/08/2026:** o MVP do fluxo principal de agendamento está implementado e validado em memória. A integração Trinks, a identificação/cadastro de cliente, a consulta de disponibilidade, a confirmação explícita e a criação de agendamento estão conectadas ao fluxo conversacional via WhatsApp/Baileys.
 
 ## Objetivo atual
 
@@ -104,7 +104,7 @@ Não há retry automático ou rate limiter complexo neste momento.
 - buscar cliente por telefone;
 - buscar cliente por CPF;
 - consultar disponibilidade de um profissional em um dia;
-- consultar disponibilidade em uma operação de múltiplos dias (implementação atual consulta apenas o dia inicial);
+- consultar disponibilidade em uma operação de múltiplos dias;
 - listar planos;
 - listar serviços;
 - listar profissionais;
@@ -121,14 +121,18 @@ O `ConversationStateService` mantém conversas em memória, incluindo histórico
 O `WhatsAppService` atualmente:
 
 1. normaliza o telefone;
-2. cria/recupera a conversa;
-3. registra a mensagem;
-4. envia o contexto ao Grok;
-5. registra a resposta;
-6. aplica regras simples para `continue`, `escalate` e `complete`;
-7. avança alguns stages básicos.
+2. cria/recupera a conversa em memória;
+3. agrupa mensagens curtas por debounce;
+4. interpreta intenção e entidades com fallback determinístico;
+5. identifica cliente por telefone ou CPF;
+6. cadastra cliente novo com nome, CPF e telefone;
+7. resolve serviço/profissional contra a Trinks;
+8. consulta disponibilidade real;
+9. solicita confirmação explícita;
+10. cria o agendamento somente após a confirmação;
+11. envia respostas pelo Baileys quando conectado.
 
-**Importante:** a extração estruturada de intenção/entidades ainda não está implementada de forma efetiva e o `WhatsAppService` ainda não executa automaticamente as operações de Booking com base na resposta da IA. Portanto, o fluxo completo de agendar/cancelar/reagendar ainda não está pronto.
+O fluxo conversacional principal de agendamento está concluído. Cancelamento, reagendamento e persistência externa continuam como escopo pós-MVP, pois exigem regras e telas/integrações adicionais que não são necessárias para validar a hipótese central do produto.
 
 ## Rotas
 
@@ -170,34 +174,35 @@ GET    /api/v1/trinks/servicos
 
 ### Booking
 
-Os controllers atuais usam `@Controller('api/booking')` e a aplicação também possui prefixo global `/api/v1`. Portanto, as rotas efetivamente expostas pelo código são:
+O controller de Booking usa `@Controller('booking')` e a aplicação aplica o prefixo global `/api/v1`. As rotas públicas são:
 
 ```http
-GET  /api/v1/api/booking/cliente/by-phone
-GET  /api/v1/api/booking/cliente/by-cpf
-GET  /api/v1/api/booking/agenda/disponivel
-GET  /api/v1/api/booking/agenda/disponivel/multiplos
-GET  /api/v1/api/booking/planos
-GET  /api/v1/api/booking/servicos
-GET  /api/v1/api/booking/profissionais
-POST /api/v1/api/booking/validar-agendamento
+POST /api/v1/booking/agendamento
+GET  /api/v1/booking/cliente/by-phone
+GET  /api/v1/booking/cliente/by-cpf
+GET  /api/v1/booking/agenda/disponivel
+GET  /api/v1/booking/agenda/disponivel/multiplos
+GET  /api/v1/booking/planos
+GET  /api/v1/booking/servicos
+GET  /api/v1/booking/profissionais
+POST /api/v1/booking/validar-agendamento
 ```
 
-A duplicação `api/v1/api` é uma inconsistência atual de roteamento e deve ser corrigida antes de tratar essas rotas como API pública estável.
+A duplicação `api/v1/api` foi removida; novas integrações devem usar as rotas acima.
 
 ### WhatsApp
 
-Pelo mesmo motivo, as rotas atuais do controller são efetivamente:
+As rotas públicas do controller WhatsApp são:
 
 ```http
-POST /api/v1/api/whatsapp/webhook
-GET  /api/v1/api/whatsapp/webhook
-GET  /api/v1/api/whatsapp/health
-POST /api/v1/api/whatsapp/test-message
-GET  /api/v1/api/whatsapp/conversation/:conversationId
+POST /api/v1/whatsapp/webhook
+GET  /api/v1/whatsapp/webhook
+GET  /api/v1/whatsapp/health
+POST /api/v1/whatsapp/test-message
+GET  /api/v1/whatsapp/conversation/:conversationId
 ```
 
-Há ainda uma inconsistência no endpoint de conversa: o controller declara `:conversationId`, mas lê o valor com `@Body()` em vez de `@Param()`. Isso precisa ser corrigido quando esse endpoint for validado.
+O endpoint de conversa lê o identificador pela rota com `@Param('conversationId')`.
 
 ## Execução local
 
@@ -244,13 +249,13 @@ WHATSAPP_VERIFY_TOKEN=...
 
 As variáveis específicas de WhatsApp/IA só são necessárias para os módulos correspondentes.
 
-## Próximo foco
+## Estado e próximos passos
 
-O próximo passo deve ser **consolidar e validar a camada de Booking/Trinks**, especialmente clientes e operações de agendamento, antes de avançar o fluxo conversacional.
+O caminho principal do MVP está concluído: uma conversa pode identificar ou cadastrar o cliente, resolver o serviço, consultar a disponibilidade, solicitar confirmação e criar o agendamento na Trinks. O estado continua em memória por decisão explícita de escopo.
 
-A prioridade continua sendo:
+As próximas evoluções são cancelamento conversacional, reagendamento, persistência de conversas e observabilidade operacional. Elas não devem ser adicionadas antes de uma necessidade concreta do produto.
 
-> **funcionalidade verificável primeiro; infraestrutura somente quando necessária.**
+> **Funcionalidade verificável primeiro; infraestrutura somente quando necessária.**
 
 Para o contexto detalhado, consulte [`docs/contexto-geral-da-aplicacao.md`](docs/contexto-geral-da-aplicacao.md).
 Para detalhes da integração de agendamentos, consulte [`docs/trinks-agendamentos.md`](docs/trinks-agendamentos.md).

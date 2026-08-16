@@ -2,6 +2,8 @@
 
 Este documento reúne o contexto técnico e comportamental do fluxo de mensagens do WhatsApp e do sistema de conversa atual, para servir de referência durante validação com outra IA ou revisão manual.
 
+> **Status em 16/08/2026:** as limitações descritas nas seções de diagnóstico sobre reconhecimento de agendamento, transição do orquestrador e execução de Booking foram corrigidas. O documento permanece como histórico das causas e regras que motivaram a implementação; para o estado vigente, consulte `README.md` e `docs/contexto-geral-da-aplicacao.md`.
+
 ## Visão Geral
 
 O projeto recebe mensagens do WhatsApp, interpreta a intenção do cliente, atualiza o contexto de conversa e decide o próximo passo pelo orquestrador conversacional.

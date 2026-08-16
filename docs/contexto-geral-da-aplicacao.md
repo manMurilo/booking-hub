@@ -222,11 +222,7 @@ Atualmente possui operações para:
 - listar profissionais;
 - validar agendamento.
 
-### Limitação importante
-
-A operação `getAvailabilityMultipleDays` existente no código atualmente consulta apenas `dataInicio` e retorna um único dia. O parâmetro `dataFim` é recebido pelo controller, mas não resulta em uma varredura real do intervalo.
-
-Não documentar essa operação como busca completa de vários dias até que isso seja implementado.
+A operação `getAvailabilityMultipleDays` percorre o intervalo inclusivo entre `dataInicio` e `dataFim`, consultando a agenda da Trinks para cada dia. O serviço mantém a validação de datas e rejeita intervalos invertidos.
 
 ## 11. Validadores
 
@@ -276,9 +272,7 @@ src/ai/prompts/system.prompt.txt
 
 A IA já consegue receber histórico e produzir uma resposta textual.
 
-### Limitação atual
-
-A extração estruturada de intenção e entidades ainda não está implementada como fluxo efetivo. O código possui tipos para intenção/entidades, mas o `WhatsAppService` ainda depende principalmente de regras simples para decidir `continue`, `escalate` ou `complete`.
+A extração estruturada combina interpretação semântica opcional com fallback determinístico. O backend continua sendo responsável por validar entidades, resolver IDs na Trinks e controlar as transições de negócio.
 
 ## 14. WhatsApp
 
@@ -295,27 +289,23 @@ O `WhatsAppService` atualmente:
 7. identifica escalação/encerramento por regras simples;
 8. avança stages básicos.
 
-### Limitações atuais
+### Estado atual
 
-- não envia resposta para a API real do WhatsApp;
-- não possui NLU estruturado completo;
-- não executa automaticamente as ações de Booking a partir da intenção da IA;
-- não conclui o fluxo real de agendamento/cancelamento/reagendamento.
+- recebe mensagens pelo adaptador Baileys e agrupa turnos com debounce;
+- interpreta intenção, serviço, profissional, data, horário, CPF e confirmação;
+- identifica cliente por telefone ou CPF;
+- cadastra cliente novo com telefone, nome e CPF;
+- consulta disponibilidade real na Trinks;
+- cria agendamento somente após confirmação explícita;
+- envia respostas via Baileys quando a conexão está disponível.
 
-## 15. Inconsistências conhecidas de rota
+Cancelamento conversacional, reagendamento e persistência externa permanecem como escopo pós-MVP.
 
-O `main.ts` aplica `/api/v1` globalmente, enquanto os controllers de Booking e WhatsApp foram declarados com `api/...` no decorator.
+## 15. Rotas públicas
 
-Por isso, atualmente essas rotas resultam em:
+O `main.ts` aplica `/api/v1`; Booking e WhatsApp usam decorators relativos ao prefixo global. As rotas são expostas sem duplicação `api/v1/api`, e o endpoint de conversa usa `@Param('conversationId')`.
 
-```text
-/api/v1/api/booking/...
-/api/v1/api/whatsapp/...
-```
-
-Isso é uma inconsistência de implementação e deve ser corrigido antes de considerar essas rotas estáveis.
-
-Também existe um problema no endpoint de consulta de conversa: a rota declara `:conversationId`, mas o controller tenta obter o valor com `@Body()` em vez de `@Param()`.
+As rotas principais estão documentadas no `README.md` e no Swagger em `/docs`.
 
 ## 16. Estado atual do MVP
 
@@ -328,27 +318,25 @@ Também existe um problema no endpoint de consulta de conversa: a rota declara `
 - consulta de agenda/disponibilidade;
 - operações de clientes;
 - operações de profissionais, serviços, planos e assinaturas;
-- camada inicial Booking;
+- camada Booking com resolução de referências e criação de agendamento;
 - validadores;
 - estado conversacional em memória;
-- integração inicial com Grok;
-- webhook/controlador WhatsApp inicial;
+- interpretação semântica opcional com fallback determinístico;
+- identificação e cadastro de clientes;
+- webhook/controlador WhatsApp com envio via Baileys;
 - Swagger;
 - tratamento global de validação e exceções.
 
-### Ainda não concluído
+### Pós-MVP
 
-- NLU estruturado confiável;
-- fluxo completo de agendamento orientado pela conversa;
-- cancelamento/reagendamento como fluxo de produto;
-- envio efetivo de mensagens pela API do WhatsApp;
+- cancelamento conversacional;
+- reagendamento conversacional;
 - persistência de conversas;
-- regras de negócio completas desacopladas da Trinks.
+- regras de negócio adicionais desacopladas da Trinks;
+- observabilidade e operação de atendimento humano.
 
 ## 17. Próximo foco
 
-A prioridade é consolidar a camada de integração e Booking antes de avançar para automação conversacional completa.
-
-A próxima funcionalidade deve ser pequena, verificável e baseada no comportamento real da Trinks.
+O fluxo principal de agendamento do MVP está concluído e coberto por testes unitários e por um teste de fluxo em memória. A próxima evolução recomendada é implementar cancelamento e reagendamento somente quando as regras operacionais estiverem definidas.
 
 > **Primeiro funcionalidade verificável; depois infraestrutura.**

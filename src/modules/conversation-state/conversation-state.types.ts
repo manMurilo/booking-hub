@@ -67,10 +67,14 @@ export enum UserIntention {
 export interface ClientData {
   phoneNumber?: string; // Vem do WhatsApp (normalizado)
   cpf?: string; // Normalizado (11 dígitos)
-  name?: string; // Normalizado (capitalizado)
+  name?: string; // Nome normalizado (capitalizado)
   clientId?: number; // ID da API Trinks
   firstName?: string; // Primeiro nome extraído
   foundInDatabase?: boolean; // Se foi encontrado na BD
+  isNewClient?: boolean;
+  waitingForRegistration?: boolean;
+  pendingName?: boolean;
+  pendingCPF?: boolean;
 }
 
 /**

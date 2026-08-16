@@ -56,7 +56,14 @@ export class MessageContextUpdaterService {
     }
 
     // Atualizar dados de booking preservando dados existentes
-    if (structuredMessage.intent === ConversationIntent.BOOKING) {
+    if (
+      structuredMessage.intent === ConversationIntent.BOOKING ||
+      context.intent === ConversationIntent.BOOKING ||
+      structuredMessage.service ||
+      structuredMessage.professional ||
+      structuredMessage.date ||
+      structuredMessage.time
+    ) {
       updated.booking = this.mergeBookingData(
         updated.booking,
         structuredMessage,
@@ -68,12 +75,50 @@ export class MessageContextUpdaterService {
       updated.client = this.mergeClientData(updated.client, structuredMessage);
     }
 
+    if (
+      structuredMessage.customerExists !== null &&
+      structuredMessage.customerExists !== undefined
+    ) {
+      updated.client = {
+        ...updated.client,
+        foundInDatabase: structuredMessage.customerExists
+          ? updated.client.foundInDatabase
+          : false,
+        isNewClient: !structuredMessage.customerExists,
+        waitingForRegistration: !structuredMessage.customerExists,
+        pendingCPF: structuredMessage.customerExists,
+      };
+
+      if (structuredMessage.customerExists) {
+        updated.metadata = {
+          ...updated.metadata,
+          identificationByCpf: true,
+        };
+      }
+    }
+
+    if (
+      structuredMessage.service ||
+      structuredMessage.professional ||
+      structuredMessage.date ||
+      structuredMessage.time
+    ) {
+      updated.metadata = {
+        ...updated.metadata,
+        confirmationDeclined: false,
+      };
+    }
+
     // Atualizar confirmação/cancelamento se detectados
     if (structuredMessage.confirmation !== null) {
       if (!updated.booking) {
         updated.booking = {};
       }
       updated.booking.isConfirmed = structuredMessage.confirmation;
+      updated.metadata = {
+        ...updated.metadata,
+        confirmationDeclined: structuredMessage.confirmation === false,
+      };
       this.logger.debug(
         `[MessageContextUpdater] Confirmação detectada: ${structuredMessage.confirmation}`,
       );
@@ -136,7 +181,7 @@ export class MessageContextUpdaterService {
     // Atualizar data apenas se fornecida
     if (structured.date) {
       merged.appointmentDateString = structured.date;
-      merged.appointmentDate = new Date(structured.date);
+      merged.appointmentDate = this.resolveDate(structured.date);
       this.logger.debug(
         `[MessageContextUpdater] Data atualizada: ${structured.date}`,
       );
@@ -153,8 +198,67 @@ export class MessageContextUpdaterService {
     return merged;
   }
 
+  private resolveDate(value: string): Date {
+    const normalized = value.trim().toLowerCase();
+    const now = new Date();
+    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    if (normalized === 'hoje') {
+      return date;
+    }
+
+    if (normalized === 'amanha' || normalized === 'amanhã') {
+      date.setDate(date.getDate() + 1);
+      return date;
+    }
+
+    if (
+      normalized === 'depois de amanha' ||
+      normalized === 'depois de amanhã'
+    ) {
+      date.setDate(date.getDate() + 2);
+      return date;
+    }
+
+    const weekdayNames = [
+      'domingo',
+      'segunda',
+      'terca',
+      'quarta',
+      'quinta',
+      'sexta',
+      'sabado',
+    ];
+    const weekdayIndex = weekdayNames.indexOf(normalized);
+    if (weekdayIndex >= 0) {
+      const daysUntil = (weekdayIndex - date.getDay() + 7) % 7 || 7;
+      date.setDate(date.getDate() + daysUntil);
+      return date;
+    }
+
+    const brazilianDate = normalized.match(
+      /^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/,
+    );
+    if (brazilianDate) {
+      const year = Number(
+        brazilianDate[3].length === 2
+          ? `20${brazilianDate[3]}`
+          : brazilianDate[3],
+      );
+      return new Date(
+        year,
+        Number(brazilianDate[2]) - 1,
+        Number(brazilianDate[1]),
+      );
+    }
+
+    const isoDate = new Date(`${normalized}T00:00:00`);
+    return Number.isNaN(isoDate.getTime()) ? date : isoDate;
+  }
+
   /**
    * Combina dados do cliente existentes com novos dados do StructuredMessage
+
    * Preserva valores existentes se a mensagem não fornece o campo
    *
    * @param existing Dados do cliente existentes

@@ -7,7 +7,9 @@ describe('DeterministicMessageInterpreter', () => {
     'quero marcar um horário',
     'qeuria cortar o cabelo',
   ])('recognizes booking intent for "%s"', async (message) => {
-    const result = await new DeterministicMessageInterpreter().interpret(message);
+    const result = await new DeterministicMessageInterpreter().interpret(
+      message,
+    );
 
     expect(result.intent).toBe(ConversationIntent.BOOKING);
   });
@@ -70,14 +72,32 @@ describe('DeterministicMessageInterpreter', () => {
   it('uses the conversation context for follow-up booking details', async () => {
     const result = await new DeterministicMessageInterpreter().interpret(
       'com o João',
-      ({
+      {
         conversation: {
           booking: { serviceName: 'cortar o cabelo' },
         },
-      }) as any,
+      },
     );
 
     expect(result.intent).toBe(ConversationIntent.BOOKING);
     expect(result.professional).toBe('João');
+  });
+
+  it('extracts customer existence and CPF during identification', async () => {
+    const interpreter = new DeterministicMessageInterpreter();
+    const existingCustomer = await interpreter.interpret('sim', {
+      conversation: {
+        step: 'client_identification' as any,
+      },
+    });
+    const cpfResponse = await interpreter.interpret('529.982.247-25', {
+      conversation: {
+        step: 'client_identification' as any,
+        metadata: { identificationByCpf: true },
+      },
+    });
+
+    expect(existingCustomer.customerExists).toBe(true);
+    expect(cpfResponse.customer?.cpf).toBe('529.982.247-25');
   });
 });

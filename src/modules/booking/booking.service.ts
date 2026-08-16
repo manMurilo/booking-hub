@@ -11,6 +11,7 @@ import { ServicosService } from '../../integrations/trinks/servicos/servicos.ser
 import { ProfissionaisService } from '../../integrations/trinks/profissionais/profissionais.service';
 import { CpfValidator } from '../validators/cpf.validator';
 import { PhoneValidator } from '../validators/phone.validator';
+import { NameValidator } from '../validators/name.validator';
 import { ConversationStateService } from '../conversation-state/conversation-state.service';
 import {
   ClienteSearchResult,
@@ -148,8 +149,121 @@ export class BookingService {
     }
   }
 
+  async resolveServiceByName(name: string): Promise<ServicoResponse | null> {
+    const normalizedName = this.normalizeSearchText(name);
+    if (!normalizedName) {
+      return null;
+    }
+
+    const response = await this.servicosService.getServicos({ nome: name });
+    const service = (response?.data ?? []).find((item: any) => {
+      const candidate = this.normalizeSearchText(String(item.nome ?? ''));
+      return candidate === normalizedName || candidate.includes(normalizedName);
+    });
+
+    if (!service) {
+      return null;
+    }
+
+    return {
+      servicoId: service.id,
+      nome: service.nome,
+      descricao: service.descricao ?? '',
+      duracao: Number(service.duracaoEmMinutos ?? service.duracao ?? 0),
+      ativo: service.ativo !== false,
+    };
+  }
+
+  async resolveProfessionalByName(
+    name: string,
+  ): Promise<ProfissionalResponse | null> {
+    const normalizedName = this.normalizeSearchText(name);
+    if (!normalizedName) {
+      return null;
+    }
+
+    const response = await this.profissionaisService.getProfissionais({
+      nome: name,
+    });
+    const professional = (response?.data ?? []).find((item: any) => {
+      const candidate = this.normalizeSearchText(String(item.nome ?? ''));
+      const nickname = this.normalizeSearchText(String(item.apelido ?? ''));
+      return (
+        candidate === normalizedName ||
+        nickname === normalizedName ||
+        candidate.includes(normalizedName) ||
+        nickname.includes(normalizedName)
+      );
+    });
+
+    if (!professional) {
+      return null;
+    }
+
+    return {
+      profissionalId: professional.id,
+      nome: professional.nome,
+      apelido:
+        typeof professional.apelido === 'string'
+          ? professional.apelido
+          : undefined,
+      ativo: professional.ativo !== false,
+      especialidades: Array.isArray(professional.especialidades)
+        ? professional.especialidades
+        : [],
+    };
+  }
+
+  async registerCliente(payload: {
+    nome: string;
+    cpf: string;
+    telefone: string;
+  }): Promise<ClienteSearchResult> {
+    const nameValidation = NameValidator.validate(payload.nome);
+    if (!nameValidation.isValid) {
+      throw new BadRequestException(nameValidation.reason ?? 'Nome inválido');
+    }
+
+    const cpfValidation = CpfValidator.validate(payload.cpf);
+    if (!cpfValidation.isValid) {
+      throw new BadRequestException('CPF inválido');
+    }
+
+    const phoneValidation = PhoneValidator.validate(payload.telefone);
+    if (!phoneValidation.isValid) {
+      throw new BadRequestException('Telefone inválido');
+    }
+
+    const telefone = phoneValidation.normalized;
+    const created = await this.clientesService.createCliente({
+      nome: nameValidation.normalized,
+      cpf: cpfValidation.normalized,
+      telefones: [
+        {
+          ddi: '55',
+          ddd: telefone.slice(2, 4),
+          numero: telefone.slice(4),
+        },
+      ],
+    });
+
+    if (!created?.id) {
+      throw new BadRequestException('A Trinks não retornou o ID do cliente');
+    }
+
+    return {
+      clienteId: created.id,
+      nome: nameValidation.normalized,
+      primeiroNome: NameValidator.getFirstName(nameValidation.normalized),
+      cpf: cpfValidation.normalized,
+      telefone,
+      ativo: true,
+    };
+  }
+
   /**
    * Busca agenda disponível para um profissional em um dia
+
    * @param profissionalId - ID do profissional
    * @param data - Data (YYYY-MM-DD)
    * @returns Disponibilidade do dia
@@ -468,7 +582,7 @@ export class BookingService {
   async createAppointment(payload: {
     clienteId: number;
     servicoId: number;
-    profissionalId: number;
+    profissionalId?: number;
     dataHora: string;
     valor?: number;
     observacoes?: string;
@@ -493,12 +607,16 @@ export class BookingService {
       throw new NotFoundException('Cliente não encontrado');
     }
 
-    const profissionais = await this.profissionaisService.getProfissionais({});
-    const profissional = profissionais?.data?.find(
-      (item: any) => item.id === profissionalId,
-    );
-    if (!profissional) {
-      throw new NotFoundException('Profissional não encontrado');
+    if (profissionalId !== undefined) {
+      const profissionais = await this.profissionaisService.getProfissionais(
+        {},
+      );
+      const profissional = profissionais?.data?.find(
+        (item: any) => item.id === profissionalId,
+      );
+      if (!profissional) {
+        throw new NotFoundException('Profissional não encontrado');
+      }
     }
 
     const duracaoEmMinutos = Number(
@@ -507,7 +625,7 @@ export class BookingService {
     const requestPayload = {
       servicoId,
       clienteId,
-      profissionalId,
+      profissionalId: profissionalId ?? null,
       dataHoraInicio: dataHora,
       duracaoEmMinutos,
       valor: valor ?? Number(servico.preco ?? 0),
@@ -541,6 +659,15 @@ export class BookingService {
    * @param dataIso - Data em formato YYYY-MM-DD
    * @returns Data formatada (ex: "segunda-feira, 15 de agosto de 2026")
    */
+  private normalizeSearchText(value: string): string {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   private toDateKey(date: Date): string {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');

@@ -19,6 +19,7 @@ export interface StructuredMessage {
     phone?: string | null;
     cpf?: string | null;
   } | null;
+  customerExists?: boolean | null;
   confirmation?: boolean | null;
   cancellation?: boolean | null;
   rawText: string;

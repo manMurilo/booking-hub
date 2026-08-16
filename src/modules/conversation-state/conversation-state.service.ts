@@ -372,12 +372,16 @@ export class ConversationStateService {
   toConversationContext(state: ConversationState): ConversationContext {
     // Mapear intenção de enum antigo para novo
     let intent = ConversationIntent.UNKNOWN;
-    if (state.lastIntention === UserIntention.SCHEDULE_APPOINTMENT) {
+    const persistedIntent = state.metadata?.currentIntent as
+      ConversationIntent | undefined;
+    if (persistedIntent) {
+      intent = persistedIntent;
+    } else if (state.lastIntention === UserIntention.SCHEDULE_APPOINTMENT) {
       intent = ConversationIntent.BOOKING;
     } else if (state.lastIntention === UserIntention.UNKNOWN) {
       intent = ConversationIntent.UNKNOWN;
     }
-    // Nota: INQUIRY e SUPPORT ainda não mapeados, pois não existem nos enums antigos
+    // Nota: INQUIRY e SUPPORT são preservados no metadata da conversa.
 
     // Mapear estágio de enum antigo para novo
     let step = ConversationStep.INITIAL;
@@ -421,6 +425,10 @@ export class ConversationStateService {
       phone: state.phoneNumber,
       cpf: state.client.cpf,
       foundInDatabase: state.client.foundInDatabase,
+      isNewClient: state.client.isNewClient,
+      waitingForRegistration: state.client.waitingForRegistration,
+      pendingName: state.client.pendingName,
+      pendingCPF: state.client.pendingCPF,
     };
 
     // Construir dados de agendamento
@@ -444,7 +452,8 @@ export class ConversationStateService {
       conversationId: state.conversationId,
       phoneNumber: state.phoneNumber,
       intent,
-      previousIntent: undefined, // Não disponível no estado antigo
+      previousIntent: state.metadata?.previousIntent as
+        ConversationIntent | undefined,
       step,
       previousStep: undefined, // Mapearia previousStage se disponível
       pendingAction: PendingAction.NONE, // Será atualizado pelo orchestrator
@@ -531,6 +540,10 @@ export class ConversationStateService {
         cpf: context.client.cpf,
         foundInDatabase: context.client.foundInDatabase,
         phoneNumber: context.client.phone,
+        isNewClient: context.client.isNewClient,
+        waitingForRegistration: context.client.waitingForRegistration,
+        pendingName: context.client.pendingName,
+        pendingCPF: context.client.pendingCPF,
       };
       this.updateClientData(conversationId, clientUpdate);
     }
@@ -552,7 +565,14 @@ export class ConversationStateService {
     }
 
     // Atualizar metadata
+    state.metadata = {
+      ...state.metadata,
+      currentIntent: context.intent,
+      previousIntent: context.previousIntent,
+    };
+
     if (context.metadata) {
+      state.metadata = { ...state.metadata, ...context.metadata };
       state.oopsCount = context.metadata.oopsCount ?? state.oopsCount;
       state.exaltationLevel =
         context.metadata.exaltationLevel ?? state.exaltationLevel;

@@ -91,6 +91,45 @@ export class TrinksAvailabilityExecutor {
         };
       }
 
+      const requestedTime = booking.appointmentTime;
+      if (requestedTime) {
+        if (availableSlots.includes(requestedTime)) {
+          const updatedContext: ConversationContext = {
+            ...context,
+            step: ConversationStep.BOOKING_CONFIRMATION,
+            pendingAction: PendingAction.CONFIRM,
+            booking: {
+              ...booking,
+              appointmentTimeSlots: availableSlots,
+            },
+          };
+
+          return {
+            success: true,
+            context: updatedContext,
+            responseText: `O horário ${requestedTime} está disponível. Tudo certo para confirmar seu agendamento?`,
+          };
+        }
+
+        const updatedContext: ConversationContext = {
+          ...context,
+          step: ConversationStep.BOOKING_TIME_SELECTION,
+          pendingAction: PendingAction.ASK_USER,
+          booking: {
+            ...booking,
+            appointmentTime: undefined,
+            appointmentTimeSlots: availableSlots,
+          },
+        };
+
+        return {
+          success: false,
+          context: updatedContext,
+          responseText: `O horário ${requestedTime} não está disponível. Os horários disponíveis são: ${availableSlots.join(', ')}. Qual você prefere?`,
+          error: 'Requested time is not available for the requested date.',
+        };
+      }
+
       const updatedContext: ConversationContext = {
         ...context,
         step: ConversationStep.BOOKING_TIME_SELECTION,

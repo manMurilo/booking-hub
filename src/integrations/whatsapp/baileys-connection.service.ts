@@ -98,13 +98,15 @@ export class BaileysConnectionService
         generateHighQualityLinkPreview: false,
       });
 
-      this.sock.ev.on('creds.update', saveCreds);
+      this.sock.ev.on('creds.update', () => {
+        void saveCreds();
+      });
       this.sock.ev.on('connection.update', (update) =>
         this.handleConnectionUpdate(update),
       );
-      this.sock.ev.on('messages.upsert', (event) =>
-        this.handleMessagesUpsert(event),
-      );
+      this.sock.ev.on('messages.upsert', (event) => {
+        void this.handleMessagesUpsert(event);
+      });
       this.sock.ev.on('messages.update', (updates) =>
         this.handleMessagesUpdate(updates),
       );
@@ -112,19 +114,8 @@ export class BaileysConnectionService
         this.handleMessageReceiptUpdate(updates),
       );
 
-      await new Promise<void>((resolve) => {
-        const checkConnection = () => {
-          if (this.sock?.user) {
-            resolve();
-            return;
-          }
-          setTimeout(checkConnection, 100);
-        };
-        checkConnection();
-      });
-
       this.logger.log(
-        `[WhatsApp] Conectado como ${this.sock?.user?.name || this.sock?.user?.id || 'usuário'}`,
+        '[WhatsApp] Socket inicializado; aguardando estado de conexão ou QR Code.',
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -315,8 +306,8 @@ export class BaileysConnectionService
     updates: Array<{
       key: WAMessageKey;
       receipt: {
-        readTimestamp?: number | null | unknown;
-        receiptTimestamp?: number | null | unknown;
+        readTimestamp?: unknown;
+        receiptTimestamp?: unknown;
       };
     }>,
   ) {
@@ -482,12 +473,14 @@ export class BaileysConnectionService
   }
 
   async disconnect(): Promise<void> {
+    await Promise.resolve();
+
     if (!this.sock) {
       return;
     }
 
     try {
-      this.sock.end(new Error('Temporary disconnect'));
+      await this.sock.end(new Error('Temporary disconnect'));
       this.sock = null;
       this.updateConnectionState(
         WhatsAppConnectionState.DISCONNECTED,
@@ -522,6 +515,8 @@ export class BaileysConnectionService
   }
 
   async close(): Promise<void> {
+    await Promise.resolve();
+
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
@@ -529,7 +524,7 @@ export class BaileysConnectionService
 
     if (this.sock) {
       try {
-        this.sock.end(new Error('Module destruction'));
+        await this.sock.end(new Error('Module destruction'));
       } catch {
         // noop
       }
